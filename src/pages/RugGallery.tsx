@@ -14,14 +14,17 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import {
-  getShowroomProductsGrouped,
+  getShowroomProducts,
+  searchShowroomProducts,
+  getShowroomProductById,
   getShowroomProductsByDesign,
   getEmplDesign,
   uploadDesignPhoto,
-  type DesignGroup,
   type ShowroomProduct,
 } from '../lib/firebase';
 import { cn, compressImage } from '../lib/utils';
+
+const PAGE_SIZE = 60;
 
 // ============================================
 // Rug Gallery Grid (Main List View)
@@ -29,19 +32,26 @@ import { cn, compressImage } from '../lib/utils';
 export function RugGallery() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: designGroups, isLoading } = useQuery({
-    queryKey: ['showroom-products-grouped'],
-    queryFn: getShowroomProductsGrouped,
-    refetchInterval: 60000,
+  // Debounce search
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+    }, 300);
+  };
+
+  // Fetch products - either search or paginated list
+  const { data: products, isLoading, isFetching } = useQuery({
+    queryKey: ['showroom-products', debouncedSearch],
+    queryFn: () => debouncedSearch
+      ? searchShowroomProducts(debouncedSearch, 200)
+      : getShowroomProducts(PAGE_SIZE),
+    staleTime: 60000,
   });
-
-  // Filter by search query
-  const filteredGroups = designGroups?.filter((group) =>
-    group.designName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    group.materials?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    group.construction?.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -59,10 +69,14 @@ export function RugGallery() {
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Rug Gallery</h1>
                 <p className="text-sm text-gray-500">
-                  {filteredGroups.length} design{filteredGroups.length !== 1 ? 's' : ''}
+                  {products?.length || 0} design{(products?.length || 0) !== 1 ? 's' : ''} shown
+                  {!debouncedSearch && ' • Search to find more'}
                 </p>
               </div>
             </div>
+            {isFetching && !isLoading && (
+              <Loader2 className="w-5 h-5 text-primary animate-spin" />
+            )}
           </div>
 
           {/* Search */}
@@ -70,9 +84,9 @@ export function RugGallery() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search designs..."
+              placeholder="Search by design name, color, construction..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full pl-10 pr-4 py-3 bg-gray-100 rounded-xl border-0 focus:ring-2 focus:ring-primary focus:bg-white transition-all"
             />
           </div>
@@ -86,25 +100,25 @@ export function RugGallery() {
             <Loader2 className="w-8 h-8 text-gray-400 animate-spin mb-3" />
             <p className="text-sm text-gray-500">Loading designs...</p>
           </div>
-        ) : filteredGroups.length === 0 ? (
+        ) : !products?.length ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
               <Grid3X3 className="w-8 h-8 text-gray-400" />
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-1">
-              {searchQuery ? 'No designs found' : 'No designs yet'}
+              {debouncedSearch ? 'No designs found' : 'No designs yet'}
             </h3>
             <p className="text-sm text-gray-500">
-              {searchQuery ? 'Try a different search term' : 'Showroom products will appear here'}
+              {debouncedSearch ? 'Try a different search term' : 'Showroom products will appear here'}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {filteredGroups.map((group) => (
-              <DesignCard
-                key={group.designName}
-                group={group}
-                onClick={() => navigate(`/rug-gallery/${encodeURIComponent(group.designName)}`)}
+            {products.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onClick={() => navigate(`/rug-gallery/${encodeURIComponent(product.id)}`)}
               />
             ))}
           </div>
@@ -115,25 +129,41 @@ export function RugGallery() {
 }
 
 // ============================================
-// Design Card Component
+// Product Card Component (with lazy loading)
 // ============================================
-function DesignCard({ group, onClick }: { group: DesignGroup; onClick: () => void }) {
+function ProductCard({ product, onClick }: { product: ShowroomProduct; onClick: () => void }) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  const photoCount = 1 + (product.additionalImages?.length || 0);
 
   return (
     <div
       onClick={onClick}
       className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-primary/30 transition-all cursor-pointer group"
     >
-      {/* Image */}
+      {/* Image with lazy loading */}
       <div className="aspect-square bg-gray-100 relative overflow-hidden">
-        {group.mainImage && !imageError ? (
-          <img
-            src={group.mainImage}
-            alt={group.displayName}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            onError={() => setImageError(true)}
-          />
+        {product.firebaseUrl && !imageError ? (
+          <>
+            {!imageLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-gray-200 border-t-primary rounded-full animate-spin" />
+              </div>
+            )}
+            <img
+              src={product.firebaseUrl}
+              alt={product.displayName}
+              loading="lazy"
+              decoding="async"
+              className={cn(
+                "w-full h-full object-cover group-hover:scale-105 transition-all duration-300",
+                !imageLoaded && "opacity-0"
+              )}
+              onLoad={() => setImageLoaded(true)}
+              onError={() => setImageError(true)}
+            />
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Image className="w-12 h-12 text-gray-300" />
@@ -141,26 +171,27 @@ function DesignCard({ group, onClick }: { group: DesignGroup; onClick: () => voi
         )}
 
         {/* Photo count badge */}
-        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 text-white rounded-full text-xs font-medium flex items-center gap-1">
-          <Camera className="w-3 h-3" />
-          {group.photoCount}
-        </div>
+        {photoCount > 0 && (
+          <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 text-white rounded-full text-xs font-medium flex items-center gap-1">
+            <Camera className="w-3 h-3" />
+            {photoCount}
+          </div>
+        )}
 
-        {/* Variants badge */}
-        {group.colorVariants.length > 1 && (
-          <div className="absolute bottom-2 left-2 px-2 py-1 bg-primary/90 text-white rounded-full text-xs font-medium flex items-center gap-1">
-            <Palette className="w-3 h-3" />
-            {group.colorVariants.length} colors
+        {/* Color badge */}
+        {product.color && (
+          <div className="absolute bottom-2 left-2 px-2 py-1 bg-white/90 text-gray-700 rounded-full text-xs font-medium">
+            {product.color}
           </div>
         )}
       </div>
 
       {/* Info */}
       <div className="p-3">
-        <h3 className="font-semibold text-gray-900 text-sm truncate">{group.designName}</h3>
-        {(group.materials || group.construction) && (
+        <h3 className="font-semibold text-gray-900 text-sm truncate">{product.displayName}</h3>
+        {(product.construction || product.category) && (
           <p className="text-xs text-gray-500 truncate mt-0.5">
-            {[group.construction, group.materials].filter(Boolean).join(' | ')}
+            {[product.construction, product.category].filter(Boolean).join(' | ')}
           </p>
         )}
       </div>
@@ -173,49 +204,55 @@ function DesignCard({ group, onClick }: { group: DesignGroup; onClick: () => voi
 // ============================================
 export function RugGalleryDetail() {
   const navigate = useNavigate();
-  const { designName } = useParams<{ designName: string }>();
-  const decodedDesignName = decodeURIComponent(designName || '');
+  const { designName: productId } = useParams<{ designName: string }>();
+  const decodedProductId = decodeURIComponent(productId || '');
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Fetch color variants from Showroom_Products
+  // Fetch the main product
+  const { data: product, isLoading: loadingProduct } = useQuery({
+    queryKey: ['showroom-product', decodedProductId],
+    queryFn: () => getShowroomProductById(decodedProductId),
+    enabled: !!decodedProductId,
+  });
+
+  // Fetch color variants (other products with same baseStyleNumber)
   const { data: variants, isLoading: loadingVariants } = useQuery({
-    queryKey: ['showroom-products-by-design', decodedDesignName],
-    queryFn: () => getShowroomProductsByDesign(decodedDesignName),
-    enabled: !!decodedDesignName,
+    queryKey: ['showroom-products-by-design', product?.baseStyleNumber],
+    queryFn: () => getShowroomProductsByDesign(product?.baseStyleNumber || ''),
+    enabled: !!product?.baseStyleNumber,
   });
 
   // Fetch EMPL design for additional uploaded photos
-  const { data: emplDesign, isLoading: loadingEmplDesign } = useQuery({
-    queryKey: ['empl-design', decodedDesignName],
-    queryFn: () => getEmplDesign(decodedDesignName),
-    enabled: !!decodedDesignName,
+  const { data: emplDesign } = useQuery({
+    queryKey: ['empl-design', product?.baseStyleNumber],
+    queryFn: () => getEmplDesign(product?.baseStyleNumber || ''),
+    enabled: !!product?.baseStyleNumber,
   });
 
-  const isLoading = loadingVariants || loadingEmplDesign;
-  const firstVariant = variants?.[0];
+  const isLoading = loadingProduct || loadingVariants;
 
-  // Collect all photos
+  // Collect all photos from this product
   const allPhotos: { url: string; source: string; label?: string }[] = [];
 
-  // Add photos from Showroom_Products variants
-  variants?.forEach((v) => {
-    if (v.firebaseUrl) {
-      allPhotos.push({
-        url: v.firebaseUrl,
-        source: 'showroom',
-        label: v.color || v.styleNumber,
-      });
-    }
-    v.additionalImages?.forEach((url, i) => {
-      allPhotos.push({
-        url,
-        source: 'showroom',
-        label: `${v.color || v.styleNumber} - ${i + 1}`,
-      });
+  // Add main photo from current product
+  if (product?.firebaseUrl) {
+    allPhotos.push({
+      url: product.firebaseUrl,
+      source: 'showroom',
+      label: 'Main',
+    });
+  }
+
+  // Add additional images from current product
+  product?.additionalImages?.forEach((url, i) => {
+    allPhotos.push({
+      url,
+      source: 'showroom',
+      label: `Image ${i + 2}`,
     });
   });
 
@@ -231,7 +268,7 @@ export function RugGalleryDetail() {
   // Handle photo upload
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !decodedDesignName) return;
+    if (!file || !product?.baseStyleNumber) return;
 
     try {
       setUploading(true);
@@ -240,11 +277,10 @@ export function RugGalleryDetail() {
       const compressedFile = await compressImage(file);
 
       // Upload to Firebase
-      await uploadDesignPhoto(decodedDesignName, compressedFile, 'gallery');
+      await uploadDesignPhoto(product.baseStyleNumber, compressedFile, 'gallery');
 
       // Refresh data
-      queryClient.invalidateQueries({ queryKey: ['empl-design', decodedDesignName] });
-      queryClient.invalidateQueries({ queryKey: ['showroom-products-grouped'] });
+      queryClient.invalidateQueries({ queryKey: ['empl-design', product.baseStyleNumber] });
     } catch (error) {
       console.error('Error uploading photo:', error);
       alert('Failed to upload photo. Please try again.');
@@ -269,10 +305,10 @@ export function RugGalleryDetail() {
               <ArrowLeft className="w-5 h-5 text-gray-600" />
             </button>
             <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-bold text-gray-900 truncate">{decodedDesignName}</h1>
-              {firstVariant && (
+              <h1 className="text-xl font-bold text-gray-900 truncate">{product?.displayName || 'Loading...'}</h1>
+              {product && (
                 <p className="text-sm text-gray-500 truncate">
-                  {[firstVariant.construction, firstVariant.materials].filter(Boolean).join(' | ')}
+                  {[product.construction, product.category, product.color].filter(Boolean).join(' | ')}
                 </p>
               )}
             </div>
@@ -287,7 +323,7 @@ export function RugGalleryDetail() {
             <Loader2 className="w-8 h-8 text-gray-400 animate-spin mb-3" />
             <p className="text-sm text-gray-500">Loading design...</p>
           </div>
-        ) : !variants?.length ? (
+        ) : !product ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
               <Image className="w-8 h-8 text-gray-400" />
@@ -298,7 +334,7 @@ export function RugGalleryDetail() {
         ) : (
           <div className="space-y-8">
             {/* Color Variants Section */}
-            {variants.length > 1 && (
+            {variants && variants.length > 1 && (
               <section>
                 <h2 className="text-sm font-medium text-gray-600 uppercase tracking-wide mb-3 flex items-center gap-2">
                   <Palette className="w-4 h-4" />
@@ -306,7 +342,7 @@ export function RugGalleryDetail() {
                 </h2>
                 <div className="flex gap-3 overflow-x-auto pb-2">
                   {variants.map((variant) => (
-                    <VariantChip key={variant.id} variant={variant} />
+                    <VariantChip key={variant.id} variant={variant} isActive={variant.id === product.id} />
                   ))}
                 </div>
               </section>
@@ -361,39 +397,49 @@ export function RugGalleryDetail() {
             </section>
 
             {/* Design Info Section */}
-            {firstVariant && (
-              <section className="bg-white rounded-xl border border-gray-200 p-4">
-                <h2 className="text-sm font-medium text-gray-600 uppercase tracking-wide mb-3">
-                  Design Details
-                </h2>
-                <dl className="grid grid-cols-2 gap-4 text-sm">
-                  {firstVariant.construction && (
-                    <div>
-                      <dt className="text-gray-500">Construction</dt>
-                      <dd className="font-medium text-gray-900">{firstVariant.construction}</dd>
-                    </div>
-                  )}
-                  {firstVariant.materials && (
-                    <div>
-                      <dt className="text-gray-500">Materials</dt>
-                      <dd className="font-medium text-gray-900">{firstVariant.materials}</dd>
-                    </div>
-                  )}
-                  {firstVariant.category && (
-                    <div>
-                      <dt className="text-gray-500">Category</dt>
-                      <dd className="font-medium text-gray-900">{firstVariant.category}</dd>
-                    </div>
-                  )}
-                  {firstVariant.size && (
-                    <div>
-                      <dt className="text-gray-500">Size</dt>
-                      <dd className="font-medium text-gray-900">{firstVariant.size}</dd>
-                    </div>
-                  )}
-                </dl>
-              </section>
-            )}
+            <section className="bg-white rounded-xl border border-gray-200 p-4">
+              <h2 className="text-sm font-medium text-gray-600 uppercase tracking-wide mb-3">
+                Design Details
+              </h2>
+              <dl className="grid grid-cols-2 gap-4 text-sm">
+                {product.baseStyleNumber && (
+                  <div>
+                    <dt className="text-gray-500">Base Style</dt>
+                    <dd className="font-medium text-gray-900">{product.baseStyleNumber}</dd>
+                  </div>
+                )}
+                {product.construction && (
+                  <div>
+                    <dt className="text-gray-500">Construction</dt>
+                    <dd className="font-medium text-gray-900">{product.construction}</dd>
+                  </div>
+                )}
+                {product.category && (
+                  <div>
+                    <dt className="text-gray-500">Category</dt>
+                    <dd className="font-medium text-gray-900">{product.category}</dd>
+                  </div>
+                )}
+                {product.color && (
+                  <div>
+                    <dt className="text-gray-500">Color</dt>
+                    <dd className="font-medium text-gray-900">{product.color}</dd>
+                  </div>
+                )}
+                {product.size && (
+                  <div>
+                    <dt className="text-gray-500">Size</dt>
+                    <dd className="font-medium text-gray-900">{product.size}</dd>
+                  </div>
+                )}
+                {product.materials && (
+                  <div className="col-span-2">
+                    <dt className="text-gray-500">Materials</dt>
+                    <dd className="font-medium text-gray-900">{product.materials}</dd>
+                  </div>
+                )}
+              </dl>
+            </section>
           </div>
         )}
       </main>
@@ -425,16 +471,26 @@ export function RugGalleryDetail() {
 // ============================================
 // Variant Chip Component
 // ============================================
-function VariantChip({ variant }: { variant: ShowroomProduct }) {
+function VariantChip({ variant, isActive }: { variant: ShowroomProduct; isActive?: boolean }) {
   const [imageError, setImageError] = useState(false);
+  const navigate = useNavigate();
 
   return (
-    <div className="flex-shrink-0 bg-white rounded-xl border border-gray-200 p-2 flex items-center gap-3 min-w-[140px]">
+    <div
+      onClick={() => navigate(`/rug-gallery/${encodeURIComponent(variant.id)}`)}
+      className={cn(
+        "flex-shrink-0 rounded-xl border p-2 flex items-center gap-3 min-w-[140px] cursor-pointer transition-all",
+        isActive
+          ? "bg-primary/5 border-primary"
+          : "bg-white border-gray-200 hover:border-primary/50"
+      )}
+    >
       <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
         {variant.firebaseUrl && !imageError ? (
           <img
             src={variant.firebaseUrl}
             alt={variant.color || variant.styleNumber}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={() => setImageError(true)}
           />
@@ -448,7 +504,7 @@ function VariantChip({ variant }: { variant: ShowroomProduct }) {
         <p className="font-medium text-gray-900 text-sm truncate">
           {variant.color || 'Default'}
         </p>
-        <p className="text-xs text-gray-500 truncate">{variant.styleNumber}</p>
+        <p className="text-xs text-gray-500 truncate">{variant.displayName}</p>
       </div>
     </div>
   );
@@ -469,6 +525,7 @@ function PhotoThumbnail({
   onClick: () => void;
 }) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   return (
     <button
@@ -476,12 +533,25 @@ function PhotoThumbnail({
       className="aspect-square rounded-xl bg-gray-100 overflow-hidden relative group hover:ring-2 hover:ring-primary transition-all"
     >
       {!imageError ? (
-        <img
-          src={url}
-          alt={label || 'Photo'}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          onError={() => setImageError(true)}
-        />
+        <>
+          {!imageLoaded && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-6 h-6 border-2 border-gray-200 border-t-primary rounded-full animate-spin" />
+            </div>
+          )}
+          <img
+            src={url}
+            alt={label || 'Photo'}
+            loading="lazy"
+            decoding="async"
+            className={cn(
+              "w-full h-full object-cover group-hover:scale-105 transition-all duration-300",
+              !imageLoaded && "opacity-0"
+            )}
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageError(true)}
+          />
+        </>
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <Image className="w-8 h-8 text-gray-300" />

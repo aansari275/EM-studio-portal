@@ -9,6 +9,7 @@ import {
   setDoc,
   query,
   orderBy,
+  limit,
   Timestamp,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -492,59 +493,103 @@ export interface EmplDesign {
 }
 
 /**
- * Get all showroom products from Showroom_Products collection
+ * Get showroom products with pagination
  */
-export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
+export async function getShowroomProducts(limitCount: number = 100): Promise<ShowroomProduct[]> {
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    const snapshot = await getDocs(showroomRef);
+    const q = query(showroomRef, orderBy('displayName', 'asc'), limit(limitCount));
+    const snapshot = await getDocs(q);
 
-    console.log('Showroom_Products count:', snapshot.size);
-
-    const products = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-
-      // Showroom_Products schema: firebaseUrl is main image, additionalImages is array
-      const mainImage = data.firebaseUrl || data.imageUrl || '';
-      const additionalImages = data.additionalImages || [];
-
-      // Use baseStyleNumber if available, otherwise extract from styleNumber/displayName
-      let baseStyleNumber = data.baseStyleNumber || '';
-      if (!baseStyleNumber) {
-        const name = data.styleNumber || data.displayName || '';
-        // Extract base style (e.g., "EM-17-AM-418" from "EM-17-AM-418-GREY-YELLOW")
-        const parts = name.split('-');
-        baseStyleNumber = parts.length >= 4 ? parts.slice(0, 4).join('-') : name;
-      }
-
-      // Build materials string
-      let materialsStr = data.materials || '';
-      if (Array.isArray(data.materials)) {
-        materialsStr = data.materials.map((m: any) => typeof m === 'string' ? m : m.name).filter(Boolean).join(', ');
-      }
-
-      return {
-        id: docSnap.id,
-        baseStyleNumber,
-        styleNumber: data.styleNumber || data.displayName || '',
-        displayName: data.displayName || data.styleNumber || '',
-        firebaseUrl: mainImage,
-        additionalImages: Array.isArray(additionalImages) ? additionalImages : [],
-        color: data.color || '',
-        materials: materialsStr,
-        construction: data.construction || '',
-        category: data.category || '',
-        size: data.size || '',
-        createdAt: timestampToString(data.createdAt),
-      };
-    });
-
-    // Sort by displayName alphabetically
-    return products.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return snapshot.docs.map((docSnap) => mapShowroomDoc(docSnap));
   } catch (error) {
     console.error('Error fetching showroom products:', error);
     return [];
   }
+}
+
+/**
+ * Get total count of showroom products
+ */
+export async function getShowroomProductsCount(): Promise<number> {
+  try {
+    const showroomRef = collection(db, SHOWROOM_COLLECTION);
+    const snapshot = await getDocs(showroomRef);
+    return snapshot.size;
+  } catch (error) {
+    console.error('Error getting count:', error);
+    return 0;
+  }
+}
+
+/**
+ * Search showroom products by name
+ */
+export async function searchShowroomProducts(searchTerm: string, limitCount: number = 100): Promise<ShowroomProduct[]> {
+  try {
+    const showroomRef = collection(db, SHOWROOM_COLLECTION);
+    // Firestore doesn't support full-text search, so we fetch and filter
+    // For better performance, limit the initial fetch
+    const q = query(showroomRef, orderBy('displayName', 'asc'), limit(1000));
+    const snapshot = await getDocs(q);
+
+    const term = searchTerm.toLowerCase();
+    const filtered = snapshot.docs
+      .filter(doc => {
+        const data = doc.data();
+        return (
+          data.displayName?.toLowerCase().includes(term) ||
+          data.baseStyleNumber?.toLowerCase().includes(term) ||
+          data.construction?.toLowerCase().includes(term) ||
+          data.color?.toLowerCase().includes(term) ||
+          data.category?.toLowerCase().includes(term)
+        );
+      })
+      .slice(0, limitCount)
+      .map(doc => mapShowroomDoc(doc));
+
+    return filtered;
+  } catch (error) {
+    console.error('Error searching showroom products:', error);
+    return [];
+  }
+}
+
+/**
+ * Map Firestore doc to ShowroomProduct
+ */
+function mapShowroomDoc(docSnap: any): ShowroomProduct {
+  const data = docSnap.data();
+
+  const mainImage = data.firebaseUrl || data.imageUrl || '';
+  const additionalImages = data.additionalImages || [];
+
+  let baseStyleNumber = data.baseStyleNumber || '';
+  if (!baseStyleNumber) {
+    const name = data.styleNumber || data.displayName || '';
+    const parts = name.split('-');
+    baseStyleNumber = parts.length >= 4 ? parts.slice(0, 4).join('-') : name;
+  }
+
+  let materialsStr = data.materials || '';
+  if (Array.isArray(data.materials)) {
+    materialsStr = data.materials.map((m: any) => typeof m === 'string' ? m : m.name).filter(Boolean).join(', ');
+  }
+
+  return {
+    id: docSnap.id,
+    baseStyleNumber,
+    styleNumber: data.styleNumber || data.displayName || '',
+    displayName: data.displayName || data.styleNumber || '',
+    firebaseUrl: mainImage,
+    additionalImages: Array.isArray(additionalImages) ? additionalImages : [],
+    color: data.color || '',
+    materials: materialsStr,
+    construction: data.construction || '',
+    category: data.category || '',
+    size: data.size || '',
+    createdAt: timestampToString(data.createdAt),
+  };
 }
 
 /**
@@ -587,11 +632,39 @@ export async function getShowroomProductsGrouped(): Promise<DesignGroup[]> {
 }
 
 /**
- * Get all color variants for a specific design
+ * Get a single showroom product by ID
  */
-export async function getShowroomProductsByDesign(designName: string): Promise<ShowroomProduct[]> {
-  const products = await getShowroomProducts();
-  return products.filter(p => p.baseStyleNumber === designName || p.styleNumber === designName);
+export async function getShowroomProductById(productId: string): Promise<ShowroomProduct | null> {
+  try {
+    const docRef = doc(db, SHOWROOM_COLLECTION, productId);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) return null;
+
+    return mapShowroomDoc(docSnap);
+  } catch (error) {
+    console.error('Error fetching showroom product:', error);
+    return null;
+  }
+}
+
+/**
+ * Get all color variants for a specific design (by baseStyleNumber)
+ */
+export async function getShowroomProductsByDesign(baseStyleNumber: string): Promise<ShowroomProduct[]> {
+  try {
+    const showroomRef = collection(db, SHOWROOM_COLLECTION);
+    // Query by baseStyleNumber
+    const q = query(showroomRef, orderBy('displayName', 'asc'), limit(50));
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs
+      .map(doc => mapShowroomDoc(doc))
+      .filter(p => p.baseStyleNumber === baseStyleNumber);
+  } catch (error) {
+    console.error('Error fetching products by design:', error);
+    return [];
+  }
 }
 
 /**
