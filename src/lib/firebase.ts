@@ -493,12 +493,12 @@ export interface EmplDesign {
 }
 
 /**
- * Get showroom products with pagination
+ * Get showroom products with pagination (latest first)
  */
 export async function getShowroomProducts(limitCount: number = 100): Promise<ShowroomProduct[]> {
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    const q = query(showroomRef, orderBy('displayName', 'asc'), limit(limitCount));
+    const q = query(showroomRef, orderBy('createdAt', 'desc'), limit(limitCount));
     const snapshot = await getDocs(q);
 
     return snapshot.docs.map((docSnap) => mapShowroomDoc(docSnap));
@@ -530,7 +530,7 @@ export async function searchShowroomProducts(searchTerm: string, limitCount: num
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
     // Firestore doesn't support full-text search, so we fetch and filter
     // For better performance, limit the initial fetch
-    const q = query(showroomRef, orderBy('displayName', 'asc'), limit(1000));
+    const q = query(showroomRef, orderBy('createdAt', 'desc'), limit(1000));
     const snapshot = await getDocs(q);
 
     const term = searchTerm.toLowerCase();
@@ -655,7 +655,7 @@ export async function getShowroomProductsByDesign(baseStyleNumber: string): Prom
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
     // Query by baseStyleNumber
-    const q = query(showroomRef, orderBy('displayName', 'asc'), limit(50));
+    const q = query(showroomRef, orderBy('createdAt', 'desc'), limit(50));
     const snapshot = await getDocs(q);
 
     return snapshot.docs
