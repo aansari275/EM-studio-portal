@@ -701,10 +701,22 @@ export function RugGalleryDetail() {
                     <dd className="font-medium text-gray-900">{product.size}</dd>
                   </div>
                 )}
+                {product.gsm && (
+                  <div>
+                    <dt className="text-gray-500">GSM</dt>
+                    <dd className="font-medium text-gray-900">{product.gsm}</dd>
+                  </div>
+                )}
                 {product.materials && (
                   <div className="col-span-2">
                     <dt className="text-gray-500">Materials</dt>
                     <dd className="font-medium text-gray-900">{product.materials}</dd>
+                  </div>
+                )}
+                {product.source && (
+                  <div className="col-span-2">
+                    <dt className="text-gray-500">Collection</dt>
+                    <dd className="font-medium text-purple-600">{product.source}</dd>
                   </div>
                 )}
               </dl>

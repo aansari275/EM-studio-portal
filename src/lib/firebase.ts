@@ -463,6 +463,7 @@ export interface ShowroomProduct {
   construction?: string;
   category?: string;
   size?: string;
+  gsm?: string; // Grams per square meter
   createdAt?: string;
   // Source tracking
   source?: string; // e.g., "Heimtextil 2026"
@@ -592,6 +593,7 @@ function mapShowroomDoc(docSnap: any): ShowroomProduct {
     construction: data.construction || '',
     category: data.category || '',
     size: data.size || '',
+    gsm: data.gsm || '',
     createdAt: timestampToString(data.createdAt),
     source: data.source || '',
     tags: data.tags || [],
