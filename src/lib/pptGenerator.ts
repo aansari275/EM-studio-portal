@@ -270,12 +270,12 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
     ]);
   }
 
-  // Add table - positioned at right side of slide (~8.51" like template)
+  // Add table - positioned at right side of slide, extending to edge (8.51 + 4.82 = 13.33)
   slide.addTable(tableRows, {
     x: 8.51,
     y: 1.21,
-    w: 4.74,
-    colW: [1.71, 0.17, 2.86],
+    w: 4.82,
+    colW: [1.71, 0.17, 2.94],
     fontFace: FONTS.main,
     fontSize: 12,
     color: COLORS.gray,
@@ -604,4 +604,3 @@ function addOutroSlide3(pptx: pptxgen) {
     align: 'center',
   });
 }
-// Build trigger 1769426403
