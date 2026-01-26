@@ -146,9 +146,9 @@ export async function getPendingDispatches(): Promise<DispatchForPhotos[]> {
 
         return {
           carpetNo: p.carpetNo || '',
-          emDesignName: p.emDesignName || '',
+          emDesignName: p.emDesignName || p.designName || '',
           clientDesignName: p.clientDesignName,
-          quality: p.rawMaterials?.undyedYarn || p.construction?.quality || '',
+          quality: p.rawMaterials?.undyedYarn || p.construction?.quality || p.quality || p.yarnType || p.material || '',
           rawPhotos,
           studioPhotos,
         };
@@ -204,9 +204,9 @@ export async function getDispatchForPhotos(id: string): Promise<DispatchForPhoto
 
       return {
         carpetNo: p.carpetNo || '',
-        emDesignName: p.emDesignName || '',
+        emDesignName: p.emDesignName || p.designName || '',
         clientDesignName: p.clientDesignName,
-        quality: p.rawMaterials?.undyedYarn || p.construction?.quality || '',
+        quality: p.rawMaterials?.undyedYarn || p.construction?.quality || p.quality || p.yarnType || p.material || '',
         rawPhotos,
         studioPhotos,
       };
