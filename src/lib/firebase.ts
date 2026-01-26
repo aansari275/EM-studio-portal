@@ -565,7 +565,8 @@ function mapShowroomDoc(docSnap: any): ShowroomProduct {
   const data = docSnap.data();
 
   const mainImage = data.firebaseUrl || data.imageUrl || '';
-  const additionalImages = data.additionalImages || [];
+  // Support both field names: additionalImages (showroom) and additionalImageUrls (heimtextil)
+  const additionalImages = data.additionalImages || data.additionalImageUrls || [];
 
   let baseStyleNumber = data.baseStyleNumber || '';
   if (!baseStyleNumber) {
