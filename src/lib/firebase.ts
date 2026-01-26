@@ -37,7 +37,7 @@ export const storage = getStorage(app);
 // Collection references
 const DISPATCHES_COLLECTION = 'sample_dispatches_to_buyers';
 const SAMPLE_BAZAR_COLLECTION = 'sample_bazar';
-const SHOWROOM_COLLECTION = 'Showroom_Products';
+const SHOWROOM_COLLECTION = 'showroom_products';
 const EMPL_DESIGNS_COLLECTION = 'empl_designs';
 
 // ============================================
