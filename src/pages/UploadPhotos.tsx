@@ -249,11 +249,18 @@ function DispatchUploader({
                 {/* Product Info */}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-semibold text-gray-900 truncate">
-                    {product.emDesignName}
+                    {product.emDesignName || product.quality || 'Product ' + (index + 1)}
                   </h4>
-                  <p className="text-sm text-gray-500 truncate">
-                    {product.carpetNo}
-                  </p>
+                  {product.carpetNo && (
+                    <p className="text-sm text-gray-500 truncate">
+                      {product.carpetNo}
+                    </p>
+                  )}
+                  {product.emDesignName && product.quality && (
+                    <p className="text-sm text-gray-500 truncate">
+                      {product.quality}
+                    </p>
+                  )}
                   <p className={cn(
                     'text-xs font-medium mt-1',
                     hasMainPhoto ? 'text-green-600' : 'text-amber-600'
@@ -312,9 +319,13 @@ function ProductDetailView({
           Back to Products
         </button>
         <div>
-          <h3 className="font-semibold text-gray-900 text-lg">{product.emDesignName}</h3>
-          <p className="text-sm text-gray-500">{product.carpetNo}</p>
-          {product.quality && (
+          <h3 className="font-semibold text-gray-900 text-lg">
+            {product.emDesignName || product.quality || 'Product'}
+          </h3>
+          {product.carpetNo && (
+            <p className="text-sm text-gray-500">{product.carpetNo}</p>
+          )}
+          {product.emDesignName && product.quality && (
             <p className="text-sm text-gray-500">{product.quality}</p>
           )}
         </div>
