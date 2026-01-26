@@ -159,11 +159,11 @@ function addIntroSlide2(pptx: pptxgen) {
 }
 
 /**
- * Product Slide - Matches template layout:
- * - Large main image on LEFT (full height)
+ * Product Slide - Matches template layout (full 13.333" width):
+ * - Large main image on LEFT (full height ~6")
  * - Logo top-right corner
  * - TABLE with product details on right
- * - Thumbnail images in a ROW at bottom
+ * - Thumbnail images in a ROW at bottom-right
  */
 function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   const slide = pptx.addSlide();
@@ -177,19 +177,19 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
 
   // === TOP RIGHT: Logo area (white box + logo) ===
   slide.addShape('rect', {
-    x: 8.13,
+    x: 10.24,
     y: 0,
-    w: 1.52,
-    h: 0.96,
+    w: 1.91,
+    h: 1.21,
     fill: { color: COLORS.white },
   });
 
   slide.addImage({
     path: `${ASSETS_BASE}/em-logo.jpeg`,
-    x: 8.28,
+    x: 10.44,
     y: 0,
-    w: 1.21,
-    h: 0.96,
+    w: 1.52,
+    h: 1.21,
   });
 
   // === LEFT SIDE: Main product image (full height) ===
@@ -197,27 +197,27 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   if (mainImage) {
     slide.addImage({
       path: mainImage,
-      x: 0.18,
-      y: 0.4,
-      w: 3.15,
-      h: 4.63,
-      sizing: { type: 'contain', w: 3.15, h: 4.63 },
+      x: 0.22,
+      y: 0.5,
+      w: 3.97,
+      h: 5.83,
+      sizing: { type: 'contain', w: 3.97, h: 5.83 },
     });
   } else {
     // Placeholder if no image
     slide.addShape('rect', {
-      x: 0.18,
-      y: 0.4,
-      w: 3.15,
-      h: 4.63,
+      x: 0.22,
+      y: 0.5,
+      w: 3.97,
+      h: 5.83,
       fill: { color: 'F5F5F5' },
     });
     slide.addText('No Image', {
-      x: 0.18,
-      y: 2.5,
-      w: 3.15,
+      x: 0.22,
+      y: 3.2,
+      w: 3.97,
       h: 0.5,
-      fontSize: 14,
+      fontSize: 16,
       fontFace: FONTS.main,
       color: COLORS.gray,
       align: 'center',
@@ -229,84 +229,85 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
 
   // Product ID row (bold)
   tableRows.push([
-    { text: 'Product ID', options: { bold: true, fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-    { text: ':', options: { bold: true, fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-    { text: product.displayName || product.baseStyleNumber || 'N/A', options: { bold: true, fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: 'Product ID', options: { bold: true, fontSize: 13, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: ':', options: { bold: true, fontSize: 13, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: product.displayName || product.baseStyleNumber || 'N/A', options: { bold: true, fontSize: 13, fontFace: FONTS.main, color: COLORS.gray } },
   ]);
 
   // Color
   if (product.color) {
     tableRows.push([
-      { text: 'Color', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.color.toUpperCase(), options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: 'Color', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: product.color.toUpperCase(), options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
     ]);
   }
 
   // Size
   if (product.size) {
     tableRows.push([
-      { text: 'Size', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.size, options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: 'Size', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: product.size, options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
     ]);
   }
 
   // Material
   if (product.materials) {
     tableRows.push([
-      { text: 'Material', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.materials.toUpperCase(), options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: 'Material', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: product.materials.toUpperCase(), options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
     ]);
   }
 
   // Construction / Category
   if (product.construction || product.category) {
     tableRows.push([
-      { text: 'Category', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: (product.construction || product.category || '').toUpperCase(), options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: 'Category', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: (product.construction || product.category || '').toUpperCase(), options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
     ]);
   }
 
-  // Add table
+  // Add table - positioned at right side of slide
   slide.addTable(tableRows, {
-    x: 6.17,
-    y: 0.96,
-    w: 3.43,
-    colW: [1.24, 0.12, 2.07],
+    x: 7.77,
+    y: 1.21,
+    w: 4.33,
+    colW: [1.56, 0.16, 2.61],
     fontFace: FONTS.main,
-    fontSize: 10,
+    fontSize: 12,
     color: COLORS.gray,
     fill: { color: COLORS.white },
     border: { type: 'none' },
-    margin: [0.04, 0.04, 0.04, 0.04],
+    margin: [0.05, 0.05, 0.05, 0.05],
     valign: 'middle',
   });
 
-  // === BOTTOM: Thumbnail images in a ROW ===
+  // === THUMBNAILS: Additional images ===
   const thumbnails = images.slice(1, 5); // Up to 4 additional thumbnails
-  if (thumbnails.length > 0) {
-    const thumbSize = 1.26;
-    const thumbY = 3.67;
-    let thumbX = 3.43;
-    const thumbGap = 0.14;
 
-    // First position: could be a detail/lifestyle image
+  if (thumbnails.length > 0) {
+    // Portrait detail image (next to main image)
     if (images.length > 1) {
       slide.addImage({
         path: images[1],
-        x: 3.43,
-        y: 2.09,
-        w: 1.07,
-        h: 1.5,
-        sizing: { type: 'contain', w: 1.07, h: 1.5 },
+        x: 4.33,
+        y: 2.63,
+        w: 1.35,
+        h: 1.89,
+        sizing: { type: 'contain', w: 1.35, h: 1.89 },
       });
     }
 
-    // Row of thumbnails at bottom
-    for (let i = 0; i < Math.min(thumbnails.length, 3); i++) {
+    // Row of square thumbnails at bottom
+    const thumbSize = 1.59;
+    const thumbY = 4.63;
+    const thumbGap = 0.17;
+    let thumbX = 4.33;
+
+    for (let i = 0; i < Math.min(thumbnails.length, 4); i++) {
       slide.addImage({
         path: thumbnails[i],
         x: thumbX,
