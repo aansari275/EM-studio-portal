@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   updateDoc,
+  setDoc,
   query,
   orderBy,
   Timestamp,
@@ -36,6 +37,8 @@ export const storage = getStorage(app);
 // Collection references
 const DISPATCHES_COLLECTION = 'sample_dispatches_to_buyers';
 const SAMPLE_BAZAR_COLLECTION = 'sample_bazar';
+const SHOWROOM_COLLECTION = 'Showroom_Products';
+const EMPL_DESIGNS_COLLECTION = 'empl_designs';
 
 // ============================================
 // Types
@@ -441,4 +444,278 @@ export async function uploadSampleBazarPhoto(
     console.error('Error uploading sample bazar photo:', error);
     throw error;
   }
+}
+
+// ============================================
+// Showroom Products - Rug Gallery
+// ============================================
+
+export interface ShowroomProduct {
+  id: string;
+  baseStyleNumber: string; // Design identifier (e.g., "EM-17-AM-418")
+  styleNumber: string; // Full ID with color (e.g., "EM-17-AM-418-GREY-YELLOW")
+  displayName: string;
+  firebaseUrl: string; // Main image URL
+  additionalImages?: string[];
+  color?: string;
+  materials?: string;
+  construction?: string;
+  category?: string;
+  size?: string;
+  createdAt?: string;
+}
+
+export interface DesignGroup {
+  designName: string; // baseStyleNumber
+  displayName: string;
+  mainImage: string;
+  photoCount: number;
+  colorVariants: ShowroomProduct[];
+  materials?: string;
+  construction?: string;
+}
+
+export interface EmplDesignPhoto {
+  url: string;
+  type: string;
+  uploadedAt: string;
+}
+
+export interface EmplDesign {
+  id: string;
+  designName: string;
+  displayName?: string;
+  photos: EmplDesignPhoto[];
+  linkedShowroomProducts: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Get all showroom products
+ */
+export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
+  try {
+    const showroomRef = collection(db, SHOWROOM_COLLECTION);
+    const snapshot = await getDocs(showroomRef);
+
+    return snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        baseStyleNumber: data.baseStyleNumber || '',
+        styleNumber: data.styleNumber || '',
+        displayName: data.displayName || data.styleNumber || '',
+        firebaseUrl: data.firebaseUrl || '',
+        additionalImages: data.additionalImages || [],
+        color: data.color || '',
+        materials: data.materials || '',
+        construction: data.construction || '',
+        category: data.category || '',
+        size: data.size || '',
+        createdAt: timestampToString(data.createdAt),
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching showroom products:', error);
+    return [];
+  }
+}
+
+/**
+ * Get showroom products grouped by design (baseStyleNumber)
+ */
+export async function getShowroomProductsGrouped(): Promise<DesignGroup[]> {
+  const products = await getShowroomProducts();
+
+  // Group by baseStyleNumber
+  const grouped = products.reduce((acc, product) => {
+    const key = product.baseStyleNumber || product.styleNumber;
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(product);
+    return acc;
+  }, {} as Record<string, ShowroomProduct[]>);
+
+  // Convert to DesignGroup array
+  return Object.entries(grouped).map(([designName, variants]) => {
+    const firstVariant = variants[0];
+
+    // Count all photos (main + additional for all variants)
+    const photoCount = variants.reduce((count, v) => {
+      let c = v.firebaseUrl ? 1 : 0;
+      c += v.additionalImages?.length || 0;
+      return count + c;
+    }, 0);
+
+    return {
+      designName,
+      displayName: designName,
+      mainImage: firstVariant.firebaseUrl || '',
+      photoCount,
+      colorVariants: variants,
+      materials: firstVariant.materials,
+      construction: firstVariant.construction,
+    };
+  }).sort((a, b) => a.designName.localeCompare(b.designName));
+}
+
+/**
+ * Get all color variants for a specific design
+ */
+export async function getShowroomProductsByDesign(designName: string): Promise<ShowroomProduct[]> {
+  const products = await getShowroomProducts();
+  return products.filter(p => p.baseStyleNumber === designName || p.styleNumber === designName);
+}
+
+/**
+ * Get or create an EMPL design entry
+ */
+export async function getEmplDesign(designName: string): Promise<EmplDesign | null> {
+  try {
+    const docRef = doc(db, EMPL_DESIGNS_COLLECTION, designName);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) return null;
+
+    const data = docSnap.data();
+    return {
+      id: docSnap.id,
+      designName: data.designName || designName,
+      displayName: data.displayName,
+      photos: data.photos || [],
+      linkedShowroomProducts: data.linkedShowroomProducts || [],
+      createdAt: timestampToString(data.createdAt),
+      updatedAt: timestampToString(data.updatedAt),
+    };
+  } catch (error) {
+    console.error('Error fetching EMPL design:', error);
+    return null;
+  }
+}
+
+/**
+ * Get all EMPL designs
+ */
+export async function getEmplDesigns(): Promise<EmplDesign[]> {
+  try {
+    const designsRef = collection(db, EMPL_DESIGNS_COLLECTION);
+    const snapshot = await getDocs(designsRef);
+
+    return snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        designName: data.designName || docSnap.id,
+        displayName: data.displayName,
+        photos: data.photos || [],
+        linkedShowroomProducts: data.linkedShowroomProducts || [],
+        createdAt: timestampToString(data.createdAt),
+        updatedAt: timestampToString(data.updatedAt),
+      };
+    });
+  } catch (error) {
+    console.error('Error fetching EMPL designs:', error);
+    return [];
+  }
+}
+
+/**
+ * Upload a photo to an EMPL design
+ */
+export async function uploadDesignPhoto(
+  designName: string,
+  file: File,
+  photoType: string = 'gallery'
+): Promise<string> {
+  try {
+    // Upload to Firebase Storage
+    const extension = file.name.split('.').pop() || 'jpg';
+    const fileName = `${photoType}_${Date.now()}.${extension}`;
+    const storagePath = `empl-designs/${designName}/${fileName}`;
+
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(storageRef);
+
+    // Check if design doc exists
+    const docRef = doc(db, EMPL_DESIGNS_COLLECTION, designName);
+    const docSnap = await getDoc(docRef);
+
+    const newPhoto: EmplDesignPhoto = {
+      url: downloadURL,
+      type: photoType,
+      uploadedAt: new Date().toISOString(),
+    };
+
+    if (docSnap.exists()) {
+      // Update existing doc
+      const data = docSnap.data();
+      const existingPhotos = data.photos || [];
+
+      await updateDoc(docRef, {
+        photos: [...existingPhotos, newPhoto],
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      // Create new doc
+      await setDoc(docRef, {
+        designName,
+        photos: [newPhoto],
+        linkedShowroomProducts: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    return downloadURL;
+  } catch (error) {
+    console.error('Error uploading design photo:', error);
+    throw error;
+  }
+}
+
+/**
+ * Seed empl_designs collection from Showroom_Products
+ * Call this once to populate the master design library
+ */
+export async function seedEmplDesignsFromShowroom(): Promise<{ created: number; skipped: number }> {
+  const products = await getShowroomProducts();
+
+  // Group by baseStyleNumber
+  const grouped = products.reduce((acc, product) => {
+    const key = product.baseStyleNumber || product.styleNumber;
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(product);
+    return acc;
+  }, {} as Record<string, ShowroomProduct[]>);
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const [designName, variants] of Object.entries(grouped)) {
+    const docRef = doc(db, EMPL_DESIGNS_COLLECTION, designName);
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists()) {
+      skipped++;
+      continue;
+    }
+
+    // Create new design entry
+    await setDoc(docRef, {
+      designName,
+      displayName: designName,
+      photos: [],
+      linkedShowroomProducts: variants.map(v => v.styleNumber),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    created++;
+  }
+
+  return { created, skipped };
 }

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Package, Truck, RefreshCw, Image, CheckCircle } from 'lucide-react';
-import { getPendingDispatches, getPendingSampleBazar } from '../lib/firebase';
+import { Camera, Package, Truck, RefreshCw, Image, CheckCircle, Grid3X3 } from 'lucide-react';
+import { getPendingDispatches, getPendingSampleBazar, getShowroomProductsGrouped } from '../lib/firebase';
 import { cn, formatDate } from '../lib/utils';
 
-type Tab = 'dispatches' | 'sample-bazar';
+type Tab = 'dispatches' | 'sample-bazar' | 'rug-gallery';
 
 export function StudioDashboard() {
   const navigate = useNavigate();
@@ -23,18 +23,30 @@ export function StudioDashboard() {
     refetchInterval: 30000,
   });
 
-  const isLoading = activeTab === 'dispatches' ? loadingDispatches : loadingSampleBazar;
+  const { data: showroomProducts, isLoading: loadingShowroom } = useQuery({
+    queryKey: ['showroom-products-grouped'],
+    queryFn: getShowroomProductsGrouped,
+    refetchInterval: 60000,
+  });
+
+  const isLoading = activeTab === 'dispatches'
+    ? loadingDispatches
+    : activeTab === 'sample-bazar'
+      ? loadingSampleBazar
+      : loadingShowroom;
 
   const handleRefresh = () => {
     if (activeTab === 'dispatches') {
       refetchDispatches();
-    } else {
+    } else if (activeTab === 'sample-bazar') {
       refetchSampleBazar();
     }
+    // Rug gallery navigates to its own page, no need to refresh here
   };
 
   const pendingDispatchCount = dispatches?.filter(d => !d.hasStudioPhotos).length || 0;
   const pendingSampleBazarCount = sampleBazar?.filter(s => !s.hasPhotos).length || 0;
+  const showroomCount = showroomProducts?.length || 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -64,17 +76,18 @@ export function StudioDashboard() {
             <button
               onClick={() => setActiveTab('dispatches')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium transition-colors',
+                'flex-1 flex items-center justify-center gap-1.5 py-3 rounded-lg font-medium transition-colors text-sm',
                 activeTab === 'dispatches'
                   ? 'bg-primary text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               )}
             >
-              <Truck className="w-5 h-5" />
-              <span>Sample Dispatches</span>
+              <Truck className="w-4 h-4" />
+              <span className="hidden sm:inline">Dispatches</span>
+              <span className="sm:hidden">Dispatch</span>
               {pendingDispatchCount > 0 && (
                 <span className={cn(
-                  'px-2 py-0.5 rounded-full text-xs font-bold',
+                  'px-1.5 py-0.5 rounded-full text-xs font-bold',
                   activeTab === 'dispatches' ? 'bg-white/20' : 'bg-amber-100 text-amber-700'
                 )}>
                   {pendingDispatchCount}
@@ -84,20 +97,37 @@ export function StudioDashboard() {
             <button
               onClick={() => setActiveTab('sample-bazar')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium transition-colors',
+                'flex-1 flex items-center justify-center gap-1.5 py-3 rounded-lg font-medium transition-colors text-sm',
                 activeTab === 'sample-bazar'
                   ? 'bg-primary text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               )}
             >
-              <Package className="w-5 h-5" />
-              <span>Sample Bazar</span>
+              <Package className="w-4 h-4" />
+              <span className="hidden sm:inline">Sample Bazar</span>
+              <span className="sm:hidden">Bazar</span>
               {pendingSampleBazarCount > 0 && (
                 <span className={cn(
-                  'px-2 py-0.5 rounded-full text-xs font-bold',
+                  'px-1.5 py-0.5 rounded-full text-xs font-bold',
                   activeTab === 'sample-bazar' ? 'bg-white/20' : 'bg-amber-100 text-amber-700'
                 )}>
                   {pendingSampleBazarCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => navigate('/rug-gallery')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-3 rounded-lg font-medium transition-colors text-sm',
+                'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              )}
+            >
+              <Grid3X3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Rug Gallery</span>
+              <span className="sm:hidden">Gallery</span>
+              {showroomCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
+                  {showroomCount}
                 </span>
               )}
             </button>
