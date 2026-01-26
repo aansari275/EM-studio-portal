@@ -37,7 +37,8 @@ export const storage = getStorage(app);
 // Collection references
 const DISPATCHES_COLLECTION = 'sample_dispatches_to_buyers';
 const SAMPLE_BAZAR_COLLECTION = 'sample_bazar';
-const SHOWROOM_COLLECTION = 'Showroom_Products';
+// Using sample_bazar for now until Showroom_Products is populated
+const SHOWROOM_COLLECTION = 'sample_bazar';
 const EMPL_DESIGNS_COLLECTION = 'empl_designs';
 
 // ============================================
@@ -492,30 +493,61 @@ export interface EmplDesign {
 }
 
 /**
- * Get all showroom products
+ * Get all showroom products (using sample_bazar as source)
  */
 export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    const snapshot = await getDocs(showroomRef);
+    const q = query(showroomRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
 
-    return snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        baseStyleNumber: data.baseStyleNumber || '',
-        styleNumber: data.styleNumber || '',
-        displayName: data.displayName || data.styleNumber || '',
-        firebaseUrl: data.firebaseUrl || '',
-        additionalImages: data.additionalImages || [],
-        color: data.color || '',
-        materials: data.materials || '',
-        construction: data.construction || '',
-        category: data.category || '',
-        size: data.size || '',
-        createdAt: timestampToString(data.createdAt),
-      };
-    });
+    return snapshot.docs
+      .filter(docSnap => {
+        const data = docSnap.data();
+        // Skip drafts
+        return !data.isDraft;
+      })
+      .map((docSnap) => {
+        const data = docSnap.data();
+
+        // Get the main image URL (frontPhoto is typically the main image in sample_bazar)
+        const mainImage = data.frontPhoto || data.images?.frontPhoto || '';
+
+        // Collect additional images
+        const additionalImages: string[] = [];
+        if (data.backPhoto) additionalImages.push(data.backPhoto);
+        if (data.labelPhoto) additionalImages.push(data.labelPhoto);
+        if (data.images?.backPhoto) additionalImages.push(data.images.backPhoto);
+        if (data.images?.labelPhoto) additionalImages.push(data.images.labelPhoto);
+
+        // Extract base design name (remove color suffix if present)
+        const designName = data.designName || data.emDesignName || '';
+        const baseStyleNumber = designName.split('-').slice(0, 4).join('-') || designName;
+
+        // Build materials string from materials array
+        let materialsStr = '';
+        if (Array.isArray(data.materials)) {
+          materialsStr = data.materials.map((m: any) => m.name || m.particulars).filter(Boolean).join(', ');
+        }
+
+        // Get primary color
+        const color = data.primaryColor || data.color || '';
+
+        return {
+          id: docSnap.id,
+          baseStyleNumber: baseStyleNumber,
+          styleNumber: data.carpetNo || designName,
+          displayName: designName,
+          firebaseUrl: mainImage,
+          additionalImages,
+          color,
+          materials: materialsStr,
+          construction: data.construction || '',
+          category: data.category || data.quality || '',
+          size: data.sizeLength && data.sizeWidth ? `${data.sizeLength}x${data.sizeWidth}` : '',
+          createdAt: timestampToString(data.createdAt),
+        };
+      });
   } catch (error) {
     console.error('Error fetching showroom products:', error);
     return [];
