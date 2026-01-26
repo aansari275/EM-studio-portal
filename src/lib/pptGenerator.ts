@@ -60,7 +60,7 @@ export async function generateProductPPT(
 
 /**
  * Intro Slide 1: Logo + Banner with certifications
- * Matches template slide 1
+ * Full width layout (13.333")
  */
 function addIntroSlide1(pptx: pptxgen) {
   const slide = pptx.addSlide();
@@ -94,62 +94,62 @@ function addIntroSlide1(pptx: pptxgen) {
     color: COLORS.gray,
   });
 
-  // Large white rounded content area for banner
+  // Large white rounded content area for banner - FULL WIDTH
   slide.addShape('roundRect', {
     x: 0.07,
     y: 1.57,
-    w: 9.45,
+    w: 13.19,
     h: 3.02,
     fill: { color: COLORS.white },
   });
 
-  // Main banner image (full width of content area)
+  // Main banner image - FULL WIDTH
   slide.addImage({
     path: `${ASSETS_BASE}/intro-banner.jpg`,
     x: 0.07,
     y: 1.9,
-    w: 9.45,
+    w: 13.19,
     h: 2.36,
   });
 }
 
 /**
  * Intro Slide 2: Factory image with company description
- * Matches template slide 2
+ * Full width layout (13.333")
  */
 function addIntroSlide2(pptx: pptxgen) {
   const slide = pptx.addSlide();
 
-  // Factory aerial image (centered, large)
+  // Factory aerial image - FULL WIDTH centered
   slide.addImage({
     path: `${ASSETS_BASE}/factory-aerial.png`,
-    x: 0.95,
+    x: 0.5,
     y: 0.24,
-    w: 7.75,
+    w: 12.33,
     h: 3.83,
-    sizing: { type: 'contain', w: 7.75, h: 3.83 },
+    sizing: { type: 'contain', w: 12.33, h: 3.83 },
   });
 
-  // Company description - "Eastern Mills" bold, rest regular
+  // Company description - "Eastern Mills" bold, rest regular - FULL WIDTH
   const descriptionText = [
     { text: 'Eastern Mills ', options: { bold: true, fontSize: 13, fontFace: FONTS.calibri, color: COLORS.grayLight } },
     { text: 'is a design driven manufacturing and export company established in 1947 that deals in rugs, carpets and home furnishing products. Our factories are based in Bhadohi and Noida which are located in Eastern India. We create home fashion rooted in the leading trends, while positioning ourselves as a robust manufacturing company with a clear focus on quality.', options: { fontSize: 13, fontFace: FONTS.calibri, color: COLORS.grayLight } },
   ];
 
   slide.addText(descriptionText, {
-    x: 1.18,
+    x: 0.5,
     y: 4.15,
-    w: 7.28,
+    w: 12.33,
     h: 1.21,
     align: 'center',
     valign: 'top',
   });
 
-  // Website URL
+  // Website URL - FULL WIDTH
   slide.addText('www.easternmills.com', {
-    x: 1.18,
+    x: 0.5,
     y: 5.5,
-    w: 7.28,
+    w: 12.33,
     h: 0.3,
     fontSize: 11,
     fontFace: FONTS.calibri,
