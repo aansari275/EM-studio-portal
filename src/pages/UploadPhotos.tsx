@@ -249,14 +249,14 @@ function DispatchUploader({
                 {/* Product Info */}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-semibold text-gray-900 truncate">
-                    {product.emDesignName || product.quality || 'Product ' + (index + 1)}
+                    {product.emDesignName || product.quality || product.carpetNo || `Product ${index + 1}`}
                   </h4>
-                  {product.carpetNo && (
+                  {(product.carpetNo && (product.emDesignName || product.quality)) && (
                     <p className="text-sm text-gray-500 truncate">
                       {product.carpetNo}
                     </p>
                   )}
-                  {product.emDesignName && product.quality && (
+                  {product.quality && product.emDesignName && (
                     <p className="text-sm text-gray-500 truncate">
                       {product.quality}
                     </p>
