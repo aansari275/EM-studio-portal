@@ -49,20 +49,30 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 ## Firebase Collections
 - **`sample_dispatches_to_buyers`** - Dispatch documents with photos array
 - **`sample_bazar`** - Product documents with photos array
-- **`sample_bazar`** - Gallery source (rug samples with photos)
-  - `designName`: Design identifier (e.g., "EM-17-AM-418")
-  - `carpetNo`: Unique carpet number
-  - `frontPhoto`, `backPhoto`, `labelPhoto`: Image URLs
-  - `construction`, `materials`, `quality`: Product details
+- **`showroom_products`** - Main product gallery (9,600+ products)
+  - `styleNumber`: Full product ID (e.g., "EM-17-AM-418-GREY-YELLOW")
+  - `baseStyleNumber`: Design identifier (e.g., "EM-17-AM-418")
+  - `displayName`: Human-readable name
+  - `firebaseUrl`: Main image URL
+  - `additionalImages`: Array of additional photo URLs
+  - `color`, `materials`, `construction`, `category`, `size`
+  - `source`: "Heimtextil 2026" for tagged products
+  - `tags`: ["Heimtextil 2026"] for filtering
 - **`empl_designs`** - Master design library for additional uploaded photos
   - `designName`: Unique key (matches `baseStyleNumber`)
   - `photos`: Array of { url, type, uploadedAt }
   - `linkedShowroomProducts`: Array of styleNumbers
 
+### Heimtextil 2026 Products
+- 328 products tagged with `source: "Heimtextil 2026"`
+- Display "HT26" badge in Rug Gallery
+- Migrated from `heimtextil_products` collection (now deleted)
+
 Photos are stored in Firebase Storage:
 - Dispatches: `studio-photos/dispatches/{dispatchId}/{filename}`
 - Sample Bazar: `sample-bazar/{productId}/{filename}`
 - EMPL Designs: `empl-designs/{designName}/{filename}`
+- Showroom: `showroom/` and `heimtextil/` folders
 
 ## Project Structure
 ```
@@ -70,12 +80,19 @@ src/
 ├── pages/
 │   ├── StudioDashboard.tsx   # Main page with three tabs
 │   ├── UploadPhotos.tsx      # Photo upload interface
-│   └── RugGallery.tsx        # Rug Gallery grid + detail views
+│   ├── RugGallery.tsx        # Rug Gallery grid + detail views
+│   └── AdminMigrate.tsx      # Admin migration tools
 ├── lib/
 │   ├── firebase.ts           # Firebase operations
-│   └── utils.ts              # Utilities (image compression, etc.)
+│   ├── utils.ts              # Utilities (image compression, etc.)
+│   └── pptGenerator.ts       # PPT generation for product exports
 ├── App.tsx                   # Routes
 └── main.tsx                  # Entry point
+
+scripts/
+├── migrate-heimtextil.mjs    # Migration script (heimtextil → showroom)
+├── tag-heimtextil.mjs        # Tag products with Heimtextil 2026
+└── delete-heimtextil-collection.mjs  # Cleanup script
 ```
 
 ## Development
@@ -102,8 +119,9 @@ netlify deploy --prod
 | `/` | Dashboard with Sample Dispatches, Sample Bazar & Rug Gallery tabs |
 | `/upload/dispatch/:id` | Upload photos for a dispatch |
 | `/upload/sample-bazar/:id` | Upload photos for a Sample Bazar product |
-| `/rug-gallery` | Browse all designs from Showroom_Products |
+| `/rug-gallery` | Browse all designs from showroom_products |
 | `/rug-gallery/:designName` | View design details, color variants, and upload photos |
+| `/admin/migrate` | Admin page for data migrations (internal use) |
 
 ## Features
 - Mobile-friendly design (works great on phones)
@@ -117,10 +135,12 @@ netlify deploy --prod
 - Reference photos from dispatch visible during upload
 
 ### Rug Gallery Features
-- Grid view of all designs (grouped by baseStyleNumber)
-- Search by design name, materials, or construction
+- Grid view of 9,600+ products with infinite scroll
+- Search by design name, color, materials, or construction
 - Detail view with all color variants
-- Combined photos from Showroom_Products + uploaded photos
+- Combined photos from showroom_products + uploaded photos
 - Upload additional photos (saved to `empl_designs` collection)
 - Lightbox for full-size image viewing
 - Design details panel (construction, materials, category, size)
+- Select mode for multi-product PPT generation
+- "HT26" badge for Heimtextil 2026 products

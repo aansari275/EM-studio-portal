@@ -464,6 +464,9 @@ export interface ShowroomProduct {
   category?: string;
   size?: string;
   createdAt?: string;
+  // Source tracking
+  source?: string; // e.g., "Heimtextil 2026"
+  tags?: string[]; // e.g., ["Heimtextil 2026"]
 }
 
 export interface DesignGroup {
@@ -589,6 +592,8 @@ function mapShowroomDoc(docSnap: any): ShowroomProduct {
     category: data.category || '',
     size: data.size || '',
     createdAt: timestampToString(data.createdAt),
+    source: data.source || '',
+    tags: data.tags || [],
   };
 }
 
@@ -816,4 +821,72 @@ export async function seedEmplDesignsFromShowroom(): Promise<{ created: number; 
   }
 
   return { created, skipped };
+}
+
+// ============================================
+// Migration: Heimtextil Products → Showroom
+// ============================================
+
+const HEIMTEXTIL_COLLECTION = 'heimtextil_products';
+
+/**
+ * Migrate all heimtextil_products to showroom_products with a tag
+ * Run this once to merge the collections
+ */
+export async function migrateHeimtextilToShowroom(): Promise<{ migrated: number; skipped: number; errors: string[] }> {
+  const heimtextilRef = collection(db, HEIMTEXTIL_COLLECTION);
+  const snapshot = await getDocs(heimtextilRef);
+
+  let migrated = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const docSnap of snapshot.docs) {
+    try {
+      const data = docSnap.data();
+
+      // Check if already exists in showroom_products
+      const showroomDocRef = doc(db, SHOWROOM_COLLECTION, docSnap.id);
+      const existingDoc = await getDoc(showroomDocRef);
+
+      if (existingDoc.exists()) {
+        // Update existing doc with tag if not already tagged
+        const existingData = existingDoc.data();
+        if (!existingData.source) {
+          await updateDoc(showroomDocRef, {
+            source: 'Heimtextil 2026',
+            tags: ['Heimtextil 2026'],
+            migratedAt: serverTimestamp(),
+          });
+        }
+        skipped++;
+        continue;
+      }
+
+      // Create new doc in showroom_products with Heimtextil tag
+      await setDoc(showroomDocRef, {
+        ...data,
+        source: 'Heimtextil 2026',
+        tags: ['Heimtextil 2026'],
+        migratedAt: serverTimestamp(),
+        createdAt: data.createdAt || serverTimestamp(),
+      });
+
+      migrated++;
+    } catch (error) {
+      errors.push(`Error migrating ${docSnap.id}: ${error}`);
+    }
+  }
+
+  console.log(`Migration complete: ${migrated} migrated, ${skipped} skipped, ${errors.length} errors`);
+  return { migrated, skipped, errors };
+}
+
+/**
+ * Get count of heimtextil_products (to verify before migration)
+ */
+export async function getHeimtextilCount(): Promise<number> {
+  const heimtextilRef = collection(db, HEIMTEXTIL_COLLECTION);
+  const snapshot = await getDocs(heimtextilRef);
+  return snapshot.size;
 }

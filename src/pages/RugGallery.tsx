@@ -440,6 +440,13 @@ function ProductCard({
           </div>
         )}
 
+        {/* Source badge (Heimtextil 2026) - only show when not in select mode */}
+        {product.source && !selectMode && (
+          <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-purple-500 text-white rounded-full text-[10px] font-medium">
+            HT26
+          </div>
+        )}
+
         {/* Color badge */}
         {product.color && (
           <div className="absolute bottom-2 left-2 px-2 py-1 bg-white/90 text-gray-700 rounded-full text-xs font-medium">
