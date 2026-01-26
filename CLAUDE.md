@@ -49,11 +49,11 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 ## Firebase Collections
 - **`sample_dispatches_to_buyers`** - Dispatch documents with photos array
 - **`sample_bazar`** - Product documents with photos array
-- **`Showroom_Products`** - Gallery photos with full product details (read-only)
-  - `baseStyleNumber`: Design identifier (e.g., "EM-17-AM-418")
-  - `styleNumber`: Full ID with color (e.g., "EM-17-AM-418-GREY-YELLOW")
-  - `firebaseUrl`: Main image URL
-  - `additionalImages`: Array of additional photo URLs
+- **`sample_bazar`** - Gallery source (rug samples with photos)
+  - `designName`: Design identifier (e.g., "EM-17-AM-418")
+  - `carpetNo`: Unique carpet number
+  - `frontPhoto`, `backPhoto`, `labelPhoto`: Image URLs
+  - `construction`, `materials`, `quality`: Product details
 - **`empl_designs`** - Master design library for additional uploaded photos
   - `designName`: Unique key (matches `baseStyleNumber`)
   - `photos`: Array of { url, type, uploadedAt }
