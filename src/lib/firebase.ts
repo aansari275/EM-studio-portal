@@ -37,8 +37,7 @@ export const storage = getStorage(app);
 // Collection references
 const DISPATCHES_COLLECTION = 'sample_dispatches_to_buyers';
 const SAMPLE_BAZAR_COLLECTION = 'sample_bazar';
-// Using sample_bazar for now until Showroom_Products is populated
-const SHOWROOM_COLLECTION = 'sample_bazar';
+const SHOWROOM_COLLECTION = 'Showroom_Products';
 const EMPL_DESIGNS_COLLECTION = 'empl_designs';
 
 // ============================================
@@ -493,75 +492,55 @@ export interface EmplDesign {
 }
 
 /**
- * Get all showroom products (using sample_bazar as source)
+ * Get all showroom products from Showroom_Products collection
  */
 export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    // Don't use orderBy to avoid needing an index - we'll sort in JS
     const snapshot = await getDocs(showroomRef);
 
-    const products = snapshot.docs
-      .filter(docSnap => {
-        const data = docSnap.data();
-        // Skip drafts
-        return !data.isDraft;
-      })
-      .map((docSnap) => {
-        const data = docSnap.data();
-        const images = data.images || {};
+    console.log('Showroom_Products count:', snapshot.size);
 
-        // Get the main image URL - check all possible image fields
-        const mainImage =
-          images.rugPhoto ||
-          images.frontPhoto ||
-          images.frontWithMasterHankAndShadeCard ||
-          images.rugImage1 ||
-          data.rugPhoto ||
-          data.frontPhoto ||
-          '';
+    const products = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
 
-        // Collect additional images from the images object
-        const additionalImages: string[] = [];
-        if (images.frontPhoto && images.frontPhoto !== mainImage) additionalImages.push(images.frontPhoto);
-        if (images.backWithRuler) additionalImages.push(images.backWithRuler);
-        if (images.frontWithMasterHankAndShadeCard && images.frontWithMasterHankAndShadeCard !== mainImage) {
-          additionalImages.push(images.frontWithMasterHankAndShadeCard);
-        }
-        if (images.rugImage1 && images.rugImage1 !== mainImage) additionalImages.push(images.rugImage1);
-        if (images.rugImage2) additionalImages.push(images.rugImage2);
+      // Showroom_Products schema: firebaseUrl is main image, additionalImages is array
+      const mainImage = data.firebaseUrl || data.imageUrl || '';
+      const additionalImages = data.additionalImages || [];
 
-        // Extract base design name (remove color suffix if present)
-        const designName = data.designName || data.emDesignName || '';
-        const baseStyleNumber = designName.split('-').slice(0, 4).join('-') || designName;
+      // Use baseStyleNumber if available, otherwise extract from styleNumber/displayName
+      let baseStyleNumber = data.baseStyleNumber || '';
+      if (!baseStyleNumber) {
+        const name = data.styleNumber || data.displayName || '';
+        // Extract base style (e.g., "EM-17-AM-418" from "EM-17-AM-418-GREY-YELLOW")
+        const parts = name.split('-');
+        baseStyleNumber = parts.length >= 4 ? parts.slice(0, 4).join('-') : name;
+      }
 
-        // Build materials string from materials array
-        let materialsStr = '';
-        if (Array.isArray(data.materials)) {
-          materialsStr = data.materials.map((m: any) => m.name || m.particulars).filter(Boolean).join(', ');
-        }
+      // Build materials string
+      let materialsStr = data.materials || '';
+      if (Array.isArray(data.materials)) {
+        materialsStr = data.materials.map((m: any) => typeof m === 'string' ? m : m.name).filter(Boolean).join(', ');
+      }
 
-        // Get primary color
-        const color = data.primaryColor || data.color || '';
+      return {
+        id: docSnap.id,
+        baseStyleNumber,
+        styleNumber: data.styleNumber || data.displayName || '',
+        displayName: data.displayName || data.styleNumber || '',
+        firebaseUrl: mainImage,
+        additionalImages: Array.isArray(additionalImages) ? additionalImages : [],
+        color: data.color || '',
+        materials: materialsStr,
+        construction: data.construction || '',
+        category: data.category || '',
+        size: data.size || '',
+        createdAt: timestampToString(data.createdAt),
+      };
+    });
 
-        return {
-          id: docSnap.id,
-          baseStyleNumber: baseStyleNumber,
-          styleNumber: data.carpetNo || designName,
-          displayName: designName,
-          firebaseUrl: mainImage,
-          additionalImages,
-          color,
-          materials: materialsStr,
-          construction: data.construction || '',
-          category: data.category || data.quality || '',
-          size: data.sizeLength && data.sizeWidth ? `${data.sizeLength}x${data.sizeWidth}` : '',
-          createdAt: timestampToString(data.createdAt),
-        };
-      });
-
-    // Sort by createdAt descending (newest first)
-    return products.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Sort by displayName alphabetically
+    return products.sort((a, b) => a.displayName.localeCompare(b.displayName));
   } catch (error) {
     console.error('Error fetching showroom products:', error);
     return [];
