@@ -498,10 +498,10 @@ export interface EmplDesign {
 export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    const q = query(showroomRef, orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
+    // Don't use orderBy to avoid needing an index - we'll sort in JS
+    const snapshot = await getDocs(showroomRef);
 
-    return snapshot.docs
+    const products = snapshot.docs
       .filter(docSnap => {
         const data = docSnap.data();
         // Skip drafts
@@ -509,16 +509,27 @@ export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
       })
       .map((docSnap) => {
         const data = docSnap.data();
+        const images = data.images || {};
 
-        // Get the main image URL (frontPhoto is typically the main image in sample_bazar)
-        const mainImage = data.frontPhoto || data.images?.frontPhoto || '';
+        // Get the main image URL - check all possible image fields
+        const mainImage =
+          images.rugPhoto ||
+          images.frontPhoto ||
+          images.frontWithMasterHankAndShadeCard ||
+          images.rugImage1 ||
+          data.rugPhoto ||
+          data.frontPhoto ||
+          '';
 
-        // Collect additional images
+        // Collect additional images from the images object
         const additionalImages: string[] = [];
-        if (data.backPhoto) additionalImages.push(data.backPhoto);
-        if (data.labelPhoto) additionalImages.push(data.labelPhoto);
-        if (data.images?.backPhoto) additionalImages.push(data.images.backPhoto);
-        if (data.images?.labelPhoto) additionalImages.push(data.images.labelPhoto);
+        if (images.frontPhoto && images.frontPhoto !== mainImage) additionalImages.push(images.frontPhoto);
+        if (images.backWithRuler) additionalImages.push(images.backWithRuler);
+        if (images.frontWithMasterHankAndShadeCard && images.frontWithMasterHankAndShadeCard !== mainImage) {
+          additionalImages.push(images.frontWithMasterHankAndShadeCard);
+        }
+        if (images.rugImage1 && images.rugImage1 !== mainImage) additionalImages.push(images.rugImage1);
+        if (images.rugImage2) additionalImages.push(images.rugImage2);
 
         // Extract base design name (remove color suffix if present)
         const designName = data.designName || data.emDesignName || '';
@@ -548,6 +559,9 @@ export async function getShowroomProducts(): Promise<ShowroomProduct[]> {
           createdAt: timestampToString(data.createdAt),
         };
       });
+
+    // Sort by createdAt descending (newest first)
+    return products.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
     console.error('Error fetching showroom products:', error);
     return [];
