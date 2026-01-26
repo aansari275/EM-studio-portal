@@ -141,6 +141,12 @@ netlify deploy --prod
 - Combined photos from showroom_products + uploaded photos
 - Upload additional photos (saved to `empl_designs` collection)
 - Lightbox for full-size image viewing
-- Design details panel (construction, materials, category, size)
+- Design details panel (construction, materials, category, size, GSM)
 - Select mode for multi-product PPT generation
 - "HT26" badge for Heimtextil 2026 products
+
+### PPT Generation
+- **Intro slide**: New Eastern logo (transparent background)
+- **Product slides**: Logo icon in corner, product image, details table (GSM included)
+- **Outro slides**: 3 slides matching EMPL template (gallery, factory info, closing)
+- Assets stored in `public/ppt-assets/`
