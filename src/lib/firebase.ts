@@ -10,6 +10,7 @@ import {
   query,
   orderBy,
   limit,
+  startAfter,
   Timestamp,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -527,26 +528,49 @@ export async function getShowroomProductsCount(): Promise<number> {
 }
 
 /**
- * Search showroom products by name
+ * Search showroom products by name, style number, color, etc.
+ * Fetches all products and filters client-side (Firestore doesn't support full-text search)
  */
-export async function searchShowroomProducts(searchTerm: string, limitCount: number = 100): Promise<ShowroomProduct[]> {
+export async function searchShowroomProducts(searchTerm: string, limitCount: number = 200): Promise<ShowroomProduct[]> {
   try {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    // Firestore doesn't support full-text search, so we fetch and filter
-    // For better performance, limit the initial fetch
-    const q = query(showroomRef, orderBy('createdAt', 'desc'), limit(1000));
-    const snapshot = await getDocs(q);
+    // Fetch all products for search (paginated)
+    const allDocs: any[] = [];
+    let lastDoc: any = null;
+    const batchSize = 500;
+
+    // Fetch up to 10,000 products for search
+    while (allDocs.length < 10000) {
+      const q = lastDoc
+        ? query(showroomRef, orderBy('createdAt', 'desc'), limit(batchSize), startAfter(lastDoc))
+        : query(showroomRef, orderBy('createdAt', 'desc'), limit(batchSize));
+
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) break;
+
+      allDocs.push(...snapshot.docs);
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+
+      if (snapshot.docs.length < batchSize) break;
+    }
 
     const term = searchTerm.toLowerCase();
-    const filtered = snapshot.docs
+    const filtered = allDocs
       .filter(doc => {
         const data = doc.data();
+        // Search across all relevant fields
         return (
           data.displayName?.toLowerCase().includes(term) ||
+          data.styleNumber?.toLowerCase().includes(term) ||
           data.baseStyleNumber?.toLowerCase().includes(term) ||
+          data.productId?.toLowerCase().includes(term) ||
           data.construction?.toLowerCase().includes(term) ||
           data.color?.toLowerCase().includes(term) ||
-          data.category?.toLowerCase().includes(term)
+          data.category?.toLowerCase().includes(term) ||
+          data.materials?.toLowerCase().includes(term) ||
+          data.size?.toLowerCase().includes(term) ||
+          data.gsm?.toLowerCase().includes(term) ||
+          doc.id?.toLowerCase().includes(term)
         );
       })
       .slice(0, limitCount)
