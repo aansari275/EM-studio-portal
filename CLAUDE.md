@@ -5,24 +5,30 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 1. **Sample Dispatches** - Photos for buyer presentations (shows in Orders app)
 2. **Sample Bazar** - Product thumbnails (shows across all apps)
 
-## Live URL
-🌐 **https://em-studio-portal.netlify.app**
+## Links
+- **Live URL:** https://em-studio-portal.netlify.app
+- **GitHub:** https://github.com/aansari275/EM-studio-portal
+- **Netlify:** https://app.netlify.com/projects/em-studio-portal
+- **Site ID:** fec3a32b-60bc-4ad6-acab-2e915f5dafb3
 
 ## Tech Stack
 - React 18 + TypeScript + Vite
 - Tailwind CSS
 - TanStack Query
 - Firebase Firestore & Storage
-- Netlify hosting
+- Netlify hosting (continuous deployment from GitHub)
 
 ## How It Works
 
 ### For the Photographer:
 1. Open https://em-studio-portal.netlify.app
 2. See two tabs: **Sample Dispatches** and **Sample Bazar**
-3. Click on any item marked "Pending"
-4. Upload photos (Main photo required, others optional)
-5. Done! Photos automatically appear everywhere they're needed
+3. Click on any dispatch marked "Pending"
+4. Upload PPT file (optional, for entire dispatch)
+5. See **product list** with status indicators (Pending/Done)
+6. Click on a product → upload photos (Main photo required)
+7. Back to list → see updated status
+8. Done when all products have main photos!
 
 ### Photo Types
 | Type | Required | Purpose |
@@ -61,8 +67,13 @@ npm run build
 ```
 
 ## Deployment
+Continuous deployment from GitHub - just push to `main`:
 ```bash
-# Deploy to Netlify
+git add . && git commit -m "message" && git push
+```
+
+Manual deploy (if needed):
+```bash
 netlify deploy --prod
 ```
 
@@ -79,3 +90,7 @@ netlify deploy --prod
 - Auto image compression (max 1920px width)
 - Shows pending vs completed items clearly
 - Photos update instantly after upload
+- **Product list view** for multi-product dispatches
+- Status indicators (Pending/Done) with photo counts
+- PPT upload support for dispatches
+- Reference photos from dispatch visible during upload
