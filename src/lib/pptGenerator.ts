@@ -175,9 +175,9 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
     images.push(...product.additionalImages.filter(Boolean));
   }
 
-  // === TOP RIGHT: Logo area (white box + logo) ===
+  // === TOP RIGHT: Logo area (white box + logo) - positioned at ~11.23" ===
   slide.addShape('rect', {
-    x: 10.24,
+    x: 11.23,
     y: 0,
     w: 1.91,
     h: 1.21,
@@ -186,9 +186,9 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
 
   slide.addImage({
     path: `${ASSETS_BASE}/em-logo.jpeg`,
-    x: 10.44,
+    x: 11.44,
     y: 0,
-    w: 1.52,
+    w: 1.67,
     h: 1.21,
   });
 
@@ -270,12 +270,12 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
     ]);
   }
 
-  // Add table - positioned at right side of slide
+  // Add table - positioned at right side of slide (~8.51" like template)
   slide.addTable(tableRows, {
-    x: 7.77,
+    x: 8.51,
     y: 1.21,
-    w: 4.33,
-    colW: [1.56, 0.16, 2.61],
+    w: 4.74,
+    colW: [1.71, 0.17, 2.86],
     fontFace: FONTS.main,
     fontSize: 12,
     color: COLORS.gray,
@@ -293,19 +293,19 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
     if (images.length > 1) {
       slide.addImage({
         path: images[1],
-        x: 4.33,
+        x: 4.74,
         y: 2.63,
-        w: 1.35,
-        h: 1.89,
-        sizing: { type: 'contain', w: 1.35, h: 1.89 },
+        w: 1.5,
+        h: 2.1,
+        sizing: { type: 'contain', w: 1.5, h: 2.1 },
       });
     }
 
-    // Row of square thumbnails at bottom
-    const thumbSize = 1.59;
-    const thumbY = 4.63;
-    const thumbGap = 0.17;
-    let thumbX = 4.33;
+    // Row of square thumbnails at bottom (spanning to right edge)
+    const thumbSize = 1.74;
+    const thumbY = 5.06;
+    const thumbGap = 0.19;
+    let thumbX = 4.74;
 
     for (let i = 0; i < Math.min(thumbnails.length, 4); i++) {
       slide.addImage({
