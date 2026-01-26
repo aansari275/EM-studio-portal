@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -12,6 +12,9 @@ import {
   Grid3X3,
   Palette,
   CheckCircle,
+  FileImage,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import {
   getShowroomProducts,
@@ -33,7 +36,14 @@ export function RugGallery() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [allProducts, setAllProducts] = useState<ShowroomProduct[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Debounce search
   const handleSearchChange = (value: string) => {
@@ -41,17 +51,108 @@ export function RugGallery() {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
       setDebouncedSearch(value);
+      setPage(1);
+      setAllProducts([]);
+      setHasMore(true);
     }, 300);
   };
 
   // Fetch products - either search or paginated list
-  const { data: products, isLoading, isFetching } = useQuery({
-    queryKey: ['showroom-products', debouncedSearch],
+  const { data: initialProducts, isLoading, isFetching } = useQuery({
+    queryKey: ['showroom-products', debouncedSearch, 1],
     queryFn: () => debouncedSearch
       ? searchShowroomProducts(debouncedSearch, 200)
       : getShowroomProducts(PAGE_SIZE),
     staleTime: 60000,
   });
+
+  // Set initial products
+  useEffect(() => {
+    if (initialProducts && page === 1) {
+      setAllProducts(initialProducts);
+      setHasMore(initialProducts.length >= PAGE_SIZE && !debouncedSearch);
+    }
+  }, [initialProducts, page, debouncedSearch]);
+
+  // Load more function
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || debouncedSearch) return;
+
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const moreProducts = await getShowroomProducts(PAGE_SIZE * nextPage);
+
+      // Get only new products
+      const existingIds = new Set(allProducts.map(p => p.id));
+      const newProducts = moreProducts.filter(p => !existingIds.has(p.id));
+
+      if (newProducts.length > 0) {
+        setAllProducts(prev => [...prev, ...newProducts]);
+        setPage(nextPage);
+      }
+
+      // Check if we've loaded all
+      if (moreProducts.length < PAGE_SIZE * nextPage) {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Error loading more:', error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [page, loadingMore, hasMore, debouncedSearch, allProducts]);
+
+  // Intersection observer for infinite scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [loadMore, hasMore, loadingMore]);
+
+  // Toggle select
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all visible
+  const selectAll = () => {
+    setSelectedIds(new Set(allProducts.map(p => p.id)));
+  };
+
+  // Clear selection
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  };
+
+  // Create PPT
+  const createPPT = async () => {
+    const selected = allProducts.filter(p => selectedIds.has(p.id));
+    // TODO: Implement PPT creation
+    alert(`Creating PPT with ${selected.length} products...\n\nThis feature will be implemented next!`);
+  };
+
+  const displayProducts = allProducts.length > 0 ? allProducts : (initialProducts || []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -69,14 +170,27 @@ export function RugGallery() {
               <div>
                 <h1 className="text-xl font-bold text-gray-900">Rug Gallery</h1>
                 <p className="text-sm text-gray-500">
-                  {products?.length || 0} design{(products?.length || 0) !== 1 ? 's' : ''} shown
-                  {!debouncedSearch && ' • Search to find more'}
+                  {displayProducts.length} design{displayProducts.length !== 1 ? 's' : ''} loaded
+                  {hasMore && !debouncedSearch && ' • Scroll for more'}
                 </p>
               </div>
             </div>
-            {isFetching && !isLoading && (
-              <Loader2 className="w-5 h-5 text-primary animate-spin" />
-            )}
+            <div className="flex items-center gap-2">
+              {isFetching && !isLoading && (
+                <Loader2 className="w-5 h-5 text-primary animate-spin" />
+              )}
+              <button
+                onClick={() => setSelectMode(!selectMode)}
+                className={cn(
+                  "px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                  selectMode
+                    ? "bg-primary text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                )}
+              >
+                {selectMode ? 'Done' : 'Select'}
+              </button>
+            </div>
           </div>
 
           {/* Search */}
@@ -90,17 +204,40 @@ export function RugGallery() {
               className="w-full pl-10 pr-4 py-3 bg-gray-100 rounded-xl border-0 focus:ring-2 focus:ring-primary focus:bg-white transition-all"
             />
           </div>
+
+          {/* Selection bar */}
+          {selectMode && (
+            <div className="flex items-center justify-between mt-3 py-2 px-3 bg-gray-100 rounded-lg">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={selectAll}
+                  className="text-sm text-primary font-medium hover:underline"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={clearSelection}
+                  className="text-sm text-gray-500 hover:underline"
+                >
+                  Clear
+                </button>
+              </div>
+              <span className="text-sm text-gray-600">
+                {selectedIds.size} selected
+              </span>
+            </div>
+          )}
         </div>
       </header>
 
       {/* Content */}
-      <main className="max-w-4xl mx-auto px-4 py-6">
+      <main className="max-w-4xl mx-auto px-4 py-6 pb-24">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="w-8 h-8 text-gray-400 animate-spin mb-3" />
             <p className="text-sm text-gray-500">Loading designs...</p>
           </div>
-        ) : !products?.length ? (
+        ) : !displayProducts.length ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
               <Grid3X3 className="w-8 h-8 text-gray-400" />
@@ -113,34 +250,101 @@ export function RugGallery() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {products.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onClick={() => navigate(`/rug-gallery/${encodeURIComponent(product.id)}`)}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {displayProducts.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  selectMode={selectMode}
+                  isSelected={selectedIds.has(product.id)}
+                  onSelect={() => toggleSelect(product.id)}
+                  onClick={() => !selectMode && navigate(`/rug-gallery/${encodeURIComponent(product.id)}`)}
+                />
+              ))}
+            </div>
+
+            {/* Load more trigger */}
+            {hasMore && !debouncedSearch && (
+              <div ref={loadMoreRef} className="flex justify-center py-8">
+                {loadingMore ? (
+                  <div className="flex items-center gap-2 text-gray-500">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm">Loading more...</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={loadMore}
+                    className="px-4 py-2 bg-gray-100 rounded-lg text-sm text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    Load More
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         )}
       </main>
+
+      {/* Floating action bar for selection */}
+      {selectMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-20">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <span className="font-medium text-gray-900">
+              {selectedIds.size} product{selectedIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={createPPT}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 transition-colors"
+            >
+              <FileImage className="w-5 h-5" />
+              Create PPT
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ============================================
-// Product Card Component (with lazy loading)
+// Product Card Component (with lazy loading & selection)
 // ============================================
-function ProductCard({ product, onClick }: { product: ShowroomProduct; onClick: () => void }) {
+function ProductCard({
+  product,
+  onClick,
+  selectMode = false,
+  isSelected = false,
+  onSelect,
+}: {
+  product: ShowroomProduct;
+  onClick: () => void;
+  selectMode?: boolean;
+  isSelected?: boolean;
+  onSelect?: () => void;
+}) {
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
 
   const photoCount = 1 + (product.additionalImages?.length || 0);
 
+  const handleClick = () => {
+    if (selectMode && onSelect) {
+      onSelect();
+    } else {
+      onClick();
+    }
+  };
+
   return (
     <div
-      onClick={onClick}
-      className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-primary/30 transition-all cursor-pointer group"
+      onClick={handleClick}
+      className={cn(
+        "bg-white rounded-xl border overflow-hidden transition-all cursor-pointer group",
+        isSelected
+          ? "border-primary ring-2 ring-primary/20"
+          : "border-gray-200 hover:shadow-lg hover:border-primary/30"
+      )}
     >
       {/* Image with lazy loading */}
       <div className="aspect-square bg-gray-100 relative overflow-hidden">
@@ -170,8 +374,23 @@ function ProductCard({ product, onClick }: { product: ShowroomProduct; onClick: 
           </div>
         )}
 
+        {/* Selection checkbox */}
+        {selectMode && (
+          <div className="absolute top-2 left-2">
+            {isSelected ? (
+              <div className="w-6 h-6 bg-primary rounded-md flex items-center justify-center">
+                <CheckSquare className="w-5 h-5 text-white" />
+              </div>
+            ) : (
+              <div className="w-6 h-6 bg-white/90 border border-gray-300 rounded-md flex items-center justify-center">
+                <Square className="w-4 h-4 text-gray-400" />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Photo count badge */}
-        {photoCount > 0 && (
+        {photoCount > 0 && !selectMode && (
           <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 text-white rounded-full text-xs font-medium flex items-center gap-1">
             <Camera className="w-3 h-3" />
             {photoCount}
