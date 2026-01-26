@@ -3,30 +3,25 @@ import type { ShowroomProduct } from './firebase';
 
 // Brand colors (matching EMPL template)
 const COLORS = {
-  primary: '2D5A4A',      // Deep green
-  secondary: '8B7355',    // Warm brown
-  text: '333333',
-  textLight: '666666',
-  textMuted: '7F7F7F',    // Gray from template
-  accent: 'E8DED1',       // Warm beige
+  gray: '808080',           // Main text color from template
+  grayLight: '7F7F7F',
   white: 'FFFFFF',
-  divider: 'E5E5E5',
   black: '000000',
 };
 
-// Font settings (Montserrat Light from template, with fallbacks)
+// Font settings (Montserrat from template)
 const FONTS = {
-  heading: 'Montserrat',
-  headingLight: 'Montserrat Light',
-  body: 'Calibri',
+  main: 'Montserrat',
+  body: 'Montserrat Light',
+  calibri: 'Calibri',
 };
 
 // PPT Assets base URL (deployed on same domain)
 const ASSETS_BASE = '/ppt-assets';
 
 /**
- * Generate a beautifully styled PowerPoint presentation
- * With intro slides, product slides, and outro slides
+ * Generate a PowerPoint presentation matching EMPL template
+ * Structure: 2 intro slides + product slides + 3 outro slides
  */
 export async function generateProductPPT(
   products: ShowroomProduct[],
@@ -40,7 +35,7 @@ export async function generateProductPPT(
   pptx.subject = 'Product Catalog';
   pptx.company = 'Eastern Mills';
 
-  // 16:9 widescreen layout
+  // 16:9 widescreen layout (same as template)
   pptx.defineLayout({ name: 'WIDESCREEN', width: 13.333, height: 7.5 });
   pptx.layout = 'WIDESCREEN';
 
@@ -64,7 +59,8 @@ export async function generateProductPPT(
 }
 
 /**
- * Intro Slide 1: Logo + Banner Image with "Making ideas tangible"
+ * Intro Slide 1: Logo + Banner with certifications
+ * Matches template slide 1
  */
 function addIntroSlide1(pptx: pptxgen) {
   const slide = pptx.addSlide();
@@ -78,7 +74,7 @@ function addIntroSlide1(pptx: pptxgen) {
     fill: { color: COLORS.white },
   });
 
-  // Logo
+  // Logo image
   slide.addImage({
     path: `${ASSETS_BASE}/em-logo.jpeg`,
     x: 0.45,
@@ -94,11 +90,11 @@ function addIntroSlide1(pptx: pptxgen) {
     w: 5.7,
     h: 0.27,
     fontSize: 19,
-    fontFace: FONTS.heading,
-    color: COLORS.textMuted,
+    fontFace: FONTS.main,
+    color: COLORS.gray,
   });
 
-  // Large white rounded content area
+  // Large white rounded content area for banner
   slide.addShape('roundRect', {
     x: 0.07,
     y: 1.57,
@@ -107,7 +103,7 @@ function addIntroSlide1(pptx: pptxgen) {
     fill: { color: COLORS.white },
   });
 
-  // Main banner image
+  // Main banner image (full width of content area)
   slide.addImage({
     path: `${ASSETS_BASE}/intro-banner.jpg`,
     x: 0.07,
@@ -119,11 +115,12 @@ function addIntroSlide1(pptx: pptxgen) {
 
 /**
  * Intro Slide 2: Factory image with company description
+ * Matches template slide 2
  */
 function addIntroSlide2(pptx: pptxgen) {
   const slide = pptx.addSlide();
 
-  // Factory aerial image (centered)
+  // Factory aerial image (centered, large)
   slide.addImage({
     path: `${ASSETS_BASE}/factory-aerial.png`,
     x: 0.95,
@@ -133,10 +130,10 @@ function addIntroSlide2(pptx: pptxgen) {
     sizing: { type: 'contain', w: 7.75, h: 3.83 },
   });
 
-  // Company description text
+  // Company description - "Eastern Mills" bold, rest regular
   const descriptionText = [
-    { text: 'Eastern Mills ', options: { bold: true, fontSize: 13, fontFace: FONTS.body, color: COLORS.textMuted } },
-    { text: 'is a design driven manufacturing and export company established in 1947 that deals in rugs, carpets and home furnishing products. Our factories are based in Bhadohi and Noida which are located in Eastern India. We create home fashion rooted in the leading trends, while positioning ourselves as a robust manufacturing company with a clear focus on quality.', options: { fontSize: 13, fontFace: FONTS.body, color: COLORS.textMuted } },
+    { text: 'Eastern Mills ', options: { bold: true, fontSize: 13, fontFace: FONTS.calibri, color: COLORS.grayLight } },
+    { text: 'is a design driven manufacturing and export company established in 1947 that deals in rugs, carpets and home furnishing products. Our factories are based in Bhadohi and Noida which are located in Eastern India. We create home fashion rooted in the leading trends, while positioning ourselves as a robust manufacturing company with a clear focus on quality.', options: { fontSize: 13, fontFace: FONTS.calibri, color: COLORS.grayLight } },
   ];
 
   slide.addText(descriptionText, {
@@ -155,14 +152,176 @@ function addIntroSlide2(pptx: pptxgen) {
     w: 7.28,
     h: 0.3,
     fontSize: 11,
-    fontFace: FONTS.body,
-    color: COLORS.textMuted,
+    fontFace: FONTS.calibri,
+    color: COLORS.grayLight,
     align: 'center',
   });
 }
 
 /**
- * Outro Slide 1: Thank You slide (can be customized)
+ * Product Slide - Matches template layout:
+ * - Large main image on LEFT (full height)
+ * - Logo top-right corner
+ * - TABLE with product details on right
+ * - Thumbnail images in a ROW at bottom
+ */
+function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
+  const slide = pptx.addSlide();
+
+  // Collect all images
+  const images: string[] = [];
+  if (product.firebaseUrl) images.push(product.firebaseUrl);
+  if (product.additionalImages) {
+    images.push(...product.additionalImages.filter(Boolean));
+  }
+
+  // === TOP RIGHT: Logo area (white box + logo) ===
+  slide.addShape('rect', {
+    x: 8.13,
+    y: 0,
+    w: 1.52,
+    h: 0.96,
+    fill: { color: COLORS.white },
+  });
+
+  slide.addImage({
+    path: `${ASSETS_BASE}/em-logo.jpeg`,
+    x: 8.28,
+    y: 0,
+    w: 1.21,
+    h: 0.96,
+  });
+
+  // === LEFT SIDE: Main product image (full height) ===
+  const mainImage = images[0];
+  if (mainImage) {
+    slide.addImage({
+      path: mainImage,
+      x: 0.18,
+      y: 0.4,
+      w: 3.15,
+      h: 4.63,
+      sizing: { type: 'contain', w: 3.15, h: 4.63 },
+    });
+  } else {
+    // Placeholder if no image
+    slide.addShape('rect', {
+      x: 0.18,
+      y: 0.4,
+      w: 3.15,
+      h: 4.63,
+      fill: { color: 'F5F5F5' },
+    });
+    slide.addText('No Image', {
+      x: 0.18,
+      y: 2.5,
+      w: 3.15,
+      h: 0.5,
+      fontSize: 14,
+      fontFace: FONTS.main,
+      color: COLORS.gray,
+      align: 'center',
+    });
+  }
+
+  // === RIGHT SIDE: Product details TABLE ===
+  const tableRows: pptxgen.TableRow[] = [];
+
+  // Product ID row (bold)
+  tableRows.push([
+    { text: 'Product ID', options: { bold: true, fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: ':', options: { bold: true, fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: product.displayName || product.baseStyleNumber || 'N/A', options: { bold: true, fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+  ]);
+
+  // Color
+  if (product.color) {
+    tableRows.push([
+      { text: 'Color', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: product.color.toUpperCase(), options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    ]);
+  }
+
+  // Size
+  if (product.size) {
+    tableRows.push([
+      { text: 'Size', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: product.size, options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    ]);
+  }
+
+  // Material
+  if (product.materials) {
+    tableRows.push([
+      { text: 'Material', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: product.materials.toUpperCase(), options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    ]);
+  }
+
+  // Construction / Category
+  if (product.construction || product.category) {
+    tableRows.push([
+      { text: 'Category', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: ':', options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+      { text: (product.construction || product.category || '').toUpperCase(), options: { fontSize: 10, fontFace: FONTS.main, color: COLORS.gray } },
+    ]);
+  }
+
+  // Add table
+  slide.addTable(tableRows, {
+    x: 6.17,
+    y: 0.96,
+    w: 3.43,
+    colW: [1.24, 0.12, 2.07],
+    fontFace: FONTS.main,
+    fontSize: 10,
+    color: COLORS.gray,
+    fill: { color: COLORS.white },
+    border: { type: 'none' },
+    margin: [0.04, 0.04, 0.04, 0.04],
+    valign: 'middle',
+  });
+
+  // === BOTTOM: Thumbnail images in a ROW ===
+  const thumbnails = images.slice(1, 5); // Up to 4 additional thumbnails
+  if (thumbnails.length > 0) {
+    const thumbSize = 1.26;
+    const thumbY = 3.67;
+    let thumbX = 3.43;
+    const thumbGap = 0.14;
+
+    // First position: could be a detail/lifestyle image
+    if (images.length > 1) {
+      slide.addImage({
+        path: images[1],
+        x: 3.43,
+        y: 2.09,
+        w: 1.07,
+        h: 1.5,
+        sizing: { type: 'contain', w: 1.07, h: 1.5 },
+      });
+    }
+
+    // Row of thumbnails at bottom
+    for (let i = 0; i < Math.min(thumbnails.length, 3); i++) {
+      slide.addImage({
+        path: thumbnails[i],
+        x: thumbX,
+        y: thumbY,
+        w: thumbSize,
+        h: thumbSize,
+        sizing: { type: 'contain', w: thumbSize, h: thumbSize },
+      });
+      thumbX += thumbSize + thumbGap;
+    }
+  }
+}
+
+/**
+ * Outro Slide 1: Thank You slide
  */
 function addOutroSlide1(pptx: pptxgen) {
   const slide = pptx.addSlide();
@@ -174,9 +333,9 @@ function addOutroSlide1(pptx: pptxgen) {
     w: 12.333,
     h: 1,
     fontSize: 48,
-    fontFace: FONTS.heading,
+    fontFace: FONTS.main,
     bold: true,
-    color: COLORS.text,
+    color: COLORS.black,
     align: 'center',
   });
 
@@ -187,9 +346,9 @@ function addOutroSlide1(pptx: pptxgen) {
     w: 12.333,
     h: 0.5,
     fontSize: 18,
-    fontFace: FONTS.headingLight,
+    fontFace: FONTS.body,
     italic: true,
-    color: COLORS.textMuted,
+    color: COLORS.gray,
     align: 'center',
   });
 
@@ -198,8 +357,8 @@ function addOutroSlide1(pptx: pptxgen) {
     x: 5.5,
     y: 4.3,
     w: 2.333,
-    h: 0.02,
-    fill: { color: COLORS.secondary },
+    h: 0.015,
+    fill: { color: COLORS.black },
   });
 
   // Website
@@ -210,13 +369,13 @@ function addOutroSlide1(pptx: pptxgen) {
     h: 0.4,
     fontSize: 14,
     fontFace: FONTS.body,
-    color: COLORS.textMuted,
+    color: COLORS.gray,
     align: 'center',
   });
 }
 
 /**
- * Outro Slide 2: Factory locations
+ * Outro Slide 2: Our Facilities with factory image
  */
 function addOutroSlide2(pptx: pptxgen) {
   const slide = pptx.addSlide();
@@ -224,107 +383,66 @@ function addOutroSlide2(pptx: pptxgen) {
   // Title
   slide.addText('Our Facilities', {
     x: 0.5,
-    y: 0.5,
+    y: 0.4,
     w: 12.333,
-    h: 0.6,
-    fontSize: 28,
-    fontFace: FONTS.heading,
+    h: 0.5,
+    fontSize: 24,
+    fontFace: FONTS.main,
     bold: true,
-    color: COLORS.text,
+    color: COLORS.black,
     align: 'center',
   });
 
-  // Factory image
+  // Factory image (large, centered)
   slide.addImage({
     path: `${ASSETS_BASE}/factory-aerial.png`,
     x: 1.5,
-    y: 1.3,
+    y: 1.1,
     w: 10.333,
     h: 4,
     sizing: { type: 'contain', w: 10.333, h: 4 },
   });
 
-  // Office Location
-  slide.addText('OFFICE LOCATION', {
+  // Bottom info row using table for alignment
+  const infoRows: pptxgen.TableRow[] = [
+    [
+      { text: 'OFFICE LOCATION', options: { bold: true, fontSize: 10, fontFace: FONTS.body, color: COLORS.black } },
+      { text: 'FACTORY LOCATION', options: { bold: true, fontSize: 10, fontFace: FONTS.body, color: COLORS.black } },
+      { text: 'OFFICE HOURS', options: { bold: true, fontSize: 10, fontFace: FONTS.body, color: COLORS.black } },
+    ],
+    [
+      { text: 'E-131, Sector 63,\nNoida, India\nPin - 201301', options: { fontSize: 10, fontFace: FONTS.body, color: COLORS.gray } },
+      { text: 'Rayan, Suriawan Road\nBhadohi, Uttar Pradesh\n221401 INDIA', options: { fontSize: 10, fontFace: FONTS.body, color: COLORS.gray } },
+      { text: 'MON-FRI\n9:30 – 17:30', options: { fontSize: 10, fontFace: FONTS.body, color: COLORS.gray } },
+    ],
+  ];
+
+  slide.addTable(infoRows, {
     x: 1,
-    y: 5.5,
-    w: 3.5,
-    h: 0.3,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
-  });
-
-  slide.addText('E-131, sector 63,\nNoida, India\nPin - 201301', {
-    x: 1,
-    y: 5.85,
-    w: 3.5,
-    h: 0.9,
-    fontSize: 11,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
-  });
-
-  // Factory Location
-  slide.addText('FACTORY LOCATION', {
-    x: 5,
-    y: 5.5,
-    w: 3.5,
-    h: 0.3,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
-  });
-
-  slide.addText('Rayan, Suriawan Road\nBhadohi, Uttar Pradesh\n221401 INDIA', {
-    x: 5,
-    y: 5.85,
-    w: 3.5,
-    h: 0.9,
-    fontSize: 11,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
-  });
-
-  // Hours
-  slide.addText('OFFICE HOURS', {
-    x: 9,
-    y: 5.5,
-    w: 3.5,
-    h: 0.3,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
-  });
-
-  slide.addText('MON-FRI\n9:30 – 17:30', {
-    x: 9,
-    y: 5.85,
-    w: 3.5,
-    h: 0.6,
-    fontSize: 11,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
+    y: 5.3,
+    w: 11.333,
+    colW: [3.78, 3.78, 3.78],
+    border: { type: 'none' },
+    fill: { color: COLORS.white },
+    margin: [0.05, 0.1, 0.05, 0.1],
   });
 }
 
 /**
- * Outro Slide 3: Contact Us slide
+ * Outro Slide 3: Contact Us with social icons
+ * Matches template slide 6
  */
 function addOutroSlide3(pptx: pptxgen) {
   const slide = pptx.addSlide();
 
-  // CONTACT US header
+  // CONTACT US header (centered)
   slide.addText('CONTACT US', {
-    x: 0.5,
-    y: 0.8,
-    w: 12.333,
-    h: 0.4,
+    x: 4.05,
+    y: 0.81,
+    w: 1.56,
+    h: 0.08,
     fontSize: 13,
-    fontFace: FONTS.headingLight,
+    fontFace: FONTS.body,
     bold: true,
     color: COLORS.black,
     align: 'center',
@@ -348,367 +466,140 @@ function addOutroSlide3(pptx: pptxgen) {
     h: 1.1,
   });
 
-  // Left column - Office Location
-  slide.addText('OFFICE LOCATION', {
+  // Contact details table (2 columns x multiple rows)
+  const contactTable: pptxgen.TableRow[] = [
+    // Headers
+    [
+      { text: 'OFFICE LOCATION', options: { bold: true, fontSize: 12, fontFace: FONTS.body, color: COLORS.black } },
+      { text: 'FACTORY LOCATION', options: { bold: true, fontSize: 12, fontFace: FONTS.body, color: COLORS.black } },
+    ],
+    // Values
+    [
+      { text: 'E-131, Sector 63,\nNoida, India\nPin - 201301', options: { fontSize: 12, fontFace: FONTS.body, color: COLORS.gray } },
+      { text: 'Rayan, Suriawan Road\nBhadohi, Uttar Pradesh\n221401 INDIA', options: { fontSize: 12, fontFace: FONTS.body, color: COLORS.gray } },
+    ],
+  ];
+
+  slide.addTable(contactTable, {
     x: 2.66,
     y: 1.68,
-    w: 2.5,
-    h: 0.33,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
+    w: 5.29,
+    colW: [2.54, 2.75],
+    border: { type: 'none' },
+    margin: [0.02, 0.02, 0.02, 0.02],
   });
 
-  slide.addText('E-131, sector 63,\nNoida, India\nPin - 201301', {
-    x: 2.66,
-    y: 2.12,
-    w: 2.5,
-    h: 1.1,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
-  });
+  // Second row of contact info
+  const contactTable2: pptxgen.TableRow[] = [
+    [
+      { text: 'OFFICE HOURS', options: { bold: true, fontSize: 12, fontFace: FONTS.body, color: COLORS.black } },
+      { text: 'CONTACT INFO', options: { bold: true, fontSize: 12, fontFace: FONTS.body, color: COLORS.black } },
+    ],
+    [
+      { text: 'MON-FRI\n9:30 – 17:30', options: { fontSize: 12, fontFace: FONTS.body, color: COLORS.gray } },
+      { text: 'www.easternmills.com\nwww.easternfoundation.org\n\nInfo@easternmills.com\n+91-120-4313641', options: { fontSize: 12, fontFace: FONTS.body, color: COLORS.gray } },
+    ],
+  ];
 
-  // Middle column - Factory Location
-  slide.addText('FACTORY LOCATION', {
-    x: 5.2,
-    y: 1.68,
-    w: 2.75,
-    h: 0.33,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
-  });
-
-  slide.addText('Rayan, Suriawan Road\nBhadohi, Uttar Pradesh\n221401 INDIA', {
-    x: 5.2,
-    y: 2.12,
-    w: 2.75,
-    h: 1.1,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
-  });
-
-  // Left column - Office Hours
-  slide.addText('OFFICE HOURS', {
+  slide.addTable(contactTable2, {
     x: 2.66,
     y: 3.35,
-    w: 2.5,
-    h: 0.33,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
+    w: 5.29,
+    colW: [2.54, 2.75],
+    border: { type: 'none' },
+    margin: [0.02, 0.02, 0.02, 0.02],
   });
 
-  slide.addText('MON-FRI\n9:30 – 17:30', {
-    x: 2.66,
-    y: 3.79,
-    w: 2.5,
-    h: 0.75,
+  // Social media icons row (circles with letters as placeholder)
+  // Twitter
+  slide.addShape('ellipse', {
+    x: 3.95,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fill: { color: COLORS.black },
+  });
+  slide.addText('X', {
+    x: 3.95,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
     fontSize: 12,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
+    fontFace: FONTS.main,
+    color: COLORS.white,
+    align: 'center',
+    valign: 'middle',
   });
 
-  // Right column - Contact Info
-  slide.addText('CONTACT INFO', {
-    x: 5.2,
-    y: 3.35,
-    w: 2.75,
-    h: 0.33,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    bold: true,
-    color: COLORS.black,
-  });
-
-  slide.addText('www.easternmills.com\nwww.easternfoundation.org', {
-    x: 5.2,
-    y: 3.79,
-    w: 2.75,
-    h: 0.6,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
-  });
-
-  slide.addText('Info@easternmills.com\n+91-120-4313641', {
-    x: 5.2,
-    y: 4.45,
-    w: 2.75,
-    h: 0.6,
-    fontSize: 12,
-    fontFace: FONTS.headingLight,
-    color: COLORS.textMuted,
-  });
-
-  // Social media handle
-  slide.addText('@easternmills', {
+  // Facebook
+  slide.addShape('ellipse', {
     x: 4.42,
-    y: 4.64,
-    w: 1.05,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fill: { color: COLORS.black },
+  });
+  slide.addText('f', {
+    x: 4.42,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fontSize: 14,
+    fontFace: FONTS.main,
+    color: COLORS.white,
+    align: 'center',
+    valign: 'middle',
+  });
+
+  // LinkedIn
+  slide.addShape('ellipse', {
+    x: 4.89,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fill: { color: COLORS.black },
+  });
+  slide.addText('in', {
+    x: 4.89,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fontSize: 10,
+    fontFace: FONTS.main,
+    color: COLORS.white,
+    align: 'center',
+    valign: 'middle',
+  });
+
+  // Instagram
+  slide.addShape('ellipse', {
+    x: 5.36,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fill: { color: COLORS.black },
+  });
+  slide.addText('ig', {
+    x: 5.36,
+    y: 4.66,
+    w: 0.35,
+    h: 0.35,
+    fontSize: 10,
+    fontFace: FONTS.main,
+    color: COLORS.white,
+    align: 'center',
+    valign: 'middle',
+  });
+
+  // @easternmills handle
+  slide.addText('@easternmills', {
+    x: 3.95,
+    y: 5.1,
+    w: 1.76,
     h: 0.23,
     fontSize: 10,
     fontFace: 'Dotum',
-    color: COLORS.textMuted,
-  });
-}
-
-/**
- * Add product slide with proper image handling
- */
-function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
-  const slide = pptx.addSlide();
-
-  // Collect all images
-  const images: string[] = [];
-  if (product.firebaseUrl) images.push(product.firebaseUrl);
-  if (product.additionalImages) {
-    images.push(...product.additionalImages.filter(Boolean));
-  }
-
-  const hasMultipleImages = images.length > 1;
-
-  // Top accent bar
-  slide.addShape('rect', {
-    x: 0,
-    y: 0,
-    w: 13.333,
-    h: 0.08,
-    fill: { color: COLORS.primary },
-  });
-
-  if (hasMultipleImages) {
-    // Multiple images layout - main image left, thumbnails right
-    addMultiImageLayout(slide, images, product);
-  } else {
-    // Single image layout - image left, details right
-    addSingleImageLayout(slide, images[0], product);
-  }
-}
-
-/**
- * Single image layout - large image on left, details on right
- */
-function addSingleImageLayout(slide: pptxgen.Slide, imageUrl: string | undefined, product: ShowroomProduct) {
-  // Image area (left 60%)
-  if (imageUrl) {
-    slide.addImage({
-      path: imageUrl,
-      x: 0.4,
-      y: 0.5,
-      w: 7.2,
-      h: 6.5,
-      sizing: { type: 'contain', w: 7.2, h: 6.5 },
-    });
-  } else {
-    // Placeholder for no image
-    slide.addShape('rect', {
-      x: 0.4,
-      y: 0.5,
-      w: 7.2,
-      h: 6.5,
-      fill: { color: 'F5F5F5' },
-    });
-    slide.addText('No Image', {
-      x: 0.4,
-      y: 3.2,
-      w: 7.2,
-      h: 0.5,
-      fontSize: 16,
-      fontFace: FONTS.body,
-      color: COLORS.textMuted,
-      align: 'center',
-    });
-  }
-
-  // Vertical divider
-  slide.addShape('rect', {
-    x: 7.9,
-    y: 0.8,
-    w: 0.015,
-    h: 6,
-    fill: { color: COLORS.divider },
-  });
-
-  // Details area (right 40%)
-  addProductDetails(slide, product, 8.3, 4.6);
-}
-
-/**
- * Multiple images layout - main image with thumbnails
- */
-function addMultiImageLayout(slide: pptxgen.Slide, images: string[], product: ShowroomProduct) {
-  const mainImage = images[0];
-  const thumbnails = images.slice(1, 4); // Max 3 thumbnails
-
-  // Main image (larger, left side)
-  if (mainImage) {
-    slide.addImage({
-      path: mainImage,
-      x: 0.4,
-      y: 0.5,
-      w: 5.8,
-      h: 6.5,
-      sizing: { type: 'contain', w: 5.8, h: 6.5 },
-    });
-  }
-
-  // Thumbnails (stacked vertically next to main image)
-  const thumbWidth = 2;
-  const thumbHeight = 2;
-  const thumbX = 6.4;
-  let thumbY = 0.5;
-
-  for (const thumb of thumbnails) {
-    slide.addImage({
-      path: thumb,
-      x: thumbX,
-      y: thumbY,
-      w: thumbWidth,
-      h: thumbHeight,
-      sizing: { type: 'contain', w: thumbWidth, h: thumbHeight },
-    });
-    thumbY += thumbHeight + 0.15;
-  }
-
-  // If more than 4 images, show indicator
-  if (images.length > 4) {
-    slide.addText(`+${images.length - 4} more`, {
-      x: thumbX,
-      y: thumbY + 0.2,
-      w: thumbWidth,
-      h: 0.3,
-      fontSize: 10,
-      fontFace: FONTS.body,
-      color: COLORS.textMuted,
-      align: 'center',
-    });
-  }
-
-  // Vertical divider
-  slide.addShape('rect', {
-    x: 8.7,
-    y: 0.8,
-    w: 0.015,
-    h: 6,
-    fill: { color: COLORS.divider },
-  });
-
-  // Details area (right side)
-  addProductDetails(slide, product, 9.1, 3.8);
-}
-
-/**
- * Add product details to slide
- */
-function addProductDetails(slide: pptxgen.Slide, product: ShowroomProduct, startX: number, width: number) {
-  let currentY = 0.6;
-
-  // Product name (title)
-  slide.addText(product.displayName || 'Unnamed Product', {
-    x: startX,
-    y: currentY,
-    w: width,
-    h: 0.9,
-    fontSize: 22,
-    fontFace: FONTS.heading,
-    bold: true,
-    color: COLORS.text,
-    valign: 'top',
-    breakLine: true,
-  });
-  currentY += 1.1;
-
-  // Accent line under title
-  slide.addShape('rect', {
-    x: startX,
-    y: currentY - 0.15,
-    w: 1.2,
-    h: 0.025,
-    fill: { color: COLORS.secondary },
-  });
-  currentY += 0.2;
-
-  // Details
-  const details: { label: string; value: string }[] = [];
-
-  if (product.baseStyleNumber && product.baseStyleNumber !== product.displayName) {
-    details.push({ label: 'STYLE', value: product.baseStyleNumber });
-  }
-  if (product.color) {
-    details.push({ label: 'COLOR', value: product.color });
-  }
-  if (product.construction) {
-    details.push({ label: 'CONSTRUCTION', value: product.construction });
-  }
-  if (product.category) {
-    details.push({ label: 'CATEGORY', value: product.category });
-  }
-  if (product.size) {
-    details.push({ label: 'SIZE', value: product.size });
-  }
-  if (product.materials) {
-    details.push({ label: 'MATERIALS', value: product.materials });
-  }
-
-  // Add each detail with clean typography
-  for (const detail of details) {
-    // Label (small, muted, uppercase)
-    slide.addText(detail.label, {
-      x: startX,
-      y: currentY,
-      w: width,
-      h: 0.25,
-      fontSize: 9,
-      fontFace: FONTS.body,
-      color: COLORS.textMuted,
-      charSpacing: 1.5,
-    });
-    currentY += 0.22;
-
-    // Value (larger, bold)
-    slide.addText(detail.value, {
-      x: startX,
-      y: currentY,
-      w: width,
-      h: 0.35,
-      fontSize: 13,
-      fontFace: FONTS.body,
-      bold: true,
-      color: COLORS.text,
-    });
-    currentY += 0.55;
-  }
-
-  // Photo count at bottom
-  const photoCount = 1 + (product.additionalImages?.length || 0);
-  if (photoCount > 1) {
-    slide.addText(`${photoCount} photos available`, {
-      x: startX,
-      y: 6.7,
-      w: width,
-      h: 0.3,
-      fontSize: 9,
-      fontFace: FONTS.body,
-      color: COLORS.textMuted,
-      italic: true,
-    });
-  }
-
-  // Eastern Mills branding at bottom right
-  slide.addText('EASTERN MILLS', {
-    x: startX,
-    y: 7,
-    w: width,
-    h: 0.25,
-    fontSize: 8,
-    fontFace: FONTS.heading,
-    color: COLORS.divider,
-    charSpacing: 2,
+    color: COLORS.gray,
+    align: 'center',
   });
 }
