@@ -448,6 +448,102 @@ export async function uploadSampleBazarPhoto(
   }
 }
 
+/**
+ * Upload a STUDIO photo for a sample bazar product
+ * This writes to the new `studioImages` array field (NOT the legacy photos array)
+ * Studio photos are professional photos taken by the studio team
+ */
+export async function uploadSampleBazarStudioPhoto(
+  productId: string,
+  file: File,
+  photoType: string = 'main'
+): Promise<string> {
+  try {
+    // Upload to Firebase Storage - use studio subfolder
+    const extension = file.name.split('.').pop() || 'jpg';
+    const fileName = `studio_${photoType}_${Date.now()}.${extension}`;
+    const storagePath = `sample-bazar/${productId}/studio/${fileName}`;
+
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(storageRef);
+
+    // Update the sample bazar document - append to studioImages array
+    const docRef = doc(db, SAMPLE_BAZAR_COLLECTION, productId);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) throw new Error('Product not found');
+
+    const data = docSnap.data();
+    const existingStudioImages = data.studioImages || [];
+
+    // For 'main' type, replace existing main photo; for others, append
+    let newStudioImages;
+    if (photoType === 'main') {
+      // Replace existing main photo
+      newStudioImages = existingStudioImages.filter((img: any) => img.type !== 'main');
+    } else {
+      newStudioImages = [...existingStudioImages];
+    }
+
+    // Add the new photo
+    newStudioImages.push({
+      url: downloadURL,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: 'Studio Team',
+      type: photoType,
+    });
+
+    await updateDoc(docRef, {
+      studioImages: newStudioImages,
+      updatedAt: serverTimestamp(),
+    });
+
+    return downloadURL;
+  } catch (error) {
+    console.error('Error uploading sample bazar studio photo:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get sample bazar items that need studio photos
+ * Returns items that don't have any studioImages yet
+ */
+export async function getSampleBazarNeedingStudioPhotos(): Promise<SampleBazarForPhotos[]> {
+  try {
+    const sampleBazarRef = collection(db, SAMPLE_BAZAR_COLLECTION);
+    const q = query(sampleBazarRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs
+      .map((docSnap) => {
+        const data = docSnap.data();
+        const studioImages = data.studioImages || [];
+        const photos = data.photos || [];
+        const hasStudioMain = studioImages.some((img: any) => img.type === 'main');
+
+        return {
+          id: docSnap.id,
+          carpetNo: data.carpetNo || '',
+          emDesignName: data.designName || data.emDesignName || '',
+          quality: data.quality || data.construction || '',
+          createdAt: timestampToString(data.createdAt),
+          photos,
+          hasPhotos: hasStudioMain,
+          photoCount: studioImages.length,
+          // Additional fields for studio context
+          studioImages,
+          factoryImages: data.images || {},
+        };
+      })
+      .filter((item) => !item.hasPhotos); // Only show items needing studio photos
+  } catch (error) {
+    console.error('Error fetching sample bazar for studio photos:', error);
+    return [];
+  }
+}
+
 // ============================================
 // Showroom Products - Rug Gallery
 // ============================================

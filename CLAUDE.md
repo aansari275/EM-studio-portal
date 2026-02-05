@@ -48,7 +48,9 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 
 ## Firebase Collections
 - **`sample_dispatches_to_buyers`** - Dispatch documents with photos array
-- **`sample_bazar`** - Product documents with photos array
+- **`sample_bazar`** - Product documents with two photo fields:
+  - `images` - Raw factory photos (frontPhoto, backWithRuler, etc.)
+  - `studioImages` - Professional studio photos array (uploaded via this portal)
 - **`showroom_products`** - Main product gallery (9,600+ products)
   - `styleNumber`: Full product ID (e.g., "EM-17-AM-418-GREY-YELLOW")
   - `baseStyleNumber`: Design identifier (e.g., "EM-17-AM-418")
@@ -70,9 +72,38 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 
 Photos are stored in Firebase Storage:
 - Dispatches: `studio-photos/dispatches/{dispatchId}/{filename}`
-- Sample Bazar: `sample-bazar/{productId}/{filename}`
+- Sample Bazar (studio): `sample-bazar/{productId}/studio/{filename}`
+- Sample Bazar (factory): `sample-bazar/{productId}/{filename}`
 - EMPL Designs: `empl-designs/{designName}/{filename}`
 - Showroom: `showroom/` and `heimtextil/` folders
+
+### Sample Bazar Image Architecture
+
+Studio Portal writes professional photos to `studioImages[]` array (NOT the old `images` object):
+
+```typescript
+// What Studio Portal writes to:
+studioImages: [
+  {
+    url: string;           // Firebase Storage URL
+    uploadedAt: string;    // ISO timestamp
+    uploadedBy: "Studio Team";
+    type: "main" | "gallery" | "detail" | "lifestyle";
+  }
+]
+
+// What factory team writes to (via Sample Bazar app):
+images: {
+  rugPhoto?: string;
+  frontPhoto?: string;
+  backWithRuler?: string;
+  // etc.
+}
+```
+
+**Key Functions in `firebase.ts`:**
+- `uploadSampleBazarStudioPhoto(productId, file, photoType)` - Uploads to `studioImages[]`
+- `getSampleBazarNeedingStudioPhotos()` - Lists items without studio photos
 
 ## Project Structure
 ```
