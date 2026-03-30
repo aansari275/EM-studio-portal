@@ -8,17 +8,21 @@ import {
   updateDoc,
   setDoc,
   query,
+  where,
   orderBy,
   limit,
   startAfter,
   Timestamp,
   serverTimestamp,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 import {
   getStorage,
   ref,
   uploadBytes,
   getDownloadURL,
+  deleteObject,
 } from 'firebase/storage';
 
 // Firebase configuration for easternmillscom project
@@ -41,6 +45,8 @@ const DISPATCHES_COLLECTION = 'sample_dispatches_to_buyers';
 const SAMPLE_BAZAR_COLLECTION = 'sample_bazar';
 const SHOWROOM_COLLECTION = 'showroom_products';
 const EMPL_DESIGNS_COLLECTION = 'empl_designs';
+const KAPETTO_PIPELINE_COLLECTION = 'kapetto_pipeline';
+const KAPETTO_SAMPLE_KITS_COLLECTION = 'kapetto_sample_kits';
 
 // ============================================
 // Types
@@ -99,6 +105,37 @@ export interface SampleBazarForPhotos {
   photos: SampleBazarPhoto[];
   hasPhotos: boolean;
   photoCount: number;
+}
+
+// ============================================
+// Kapetto Kits Types
+// ============================================
+
+export interface KapettoKit {
+  id: string;
+  name: string;
+  company: string;
+  title?: string;
+  segment?: string;
+  stage: string;
+  kitPhotos?: string[];
+  sampleKitId?: string;
+  updatedAt: any;
+}
+
+export interface KapettoSampleKitProduct {
+  productName: string;
+  collectionName: string;
+  imageUrl: string;
+  material: string;
+  construction: string;
+  quantity: number;
+}
+
+export interface KapettoSampleKit {
+  id: string;
+  pipelineLeadId: string;
+  products: KapettoSampleKitProduct[];
 }
 
 // ============================================
@@ -1012,4 +1049,143 @@ export async function getHeimtextilCount(): Promise<number> {
   const heimtextilRef = collection(db, HEIMTEXTIL_COLLECTION);
   const snapshot = await getDocs(heimtextilRef);
   return snapshot.size;
+}
+
+// ============================================
+// Kapetto Kits - For Studio Portal
+// ============================================
+
+/**
+ * Fetch pipeline leads where stage is 'sample_requested' or 'sample_sent'
+ */
+export async function getKapettoKits(): Promise<KapettoKit[]> {
+  try {
+    const pipelineRef = collection(db, KAPETTO_PIPELINE_COLLECTION);
+
+    // Two queries: one for each stage
+    const q1 = query(pipelineRef, where('stage', '==', 'sample_requested'));
+    const q2 = query(pipelineRef, where('stage', '==', 'sample_sent'));
+
+    const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+
+    const mapDoc = (docSnap: any): KapettoKit => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        name: data.name || data.contactName || '',
+        company: data.company || data.companyName || '',
+        title: data.title || '',
+        segment: data.segment || '',
+        stage: data.stage || '',
+        kitPhotos: data.kitPhotos || [],
+        sampleKitId: data.sampleKitId || '',
+        updatedAt: data.updatedAt || data.createdAt || null,
+      };
+    };
+
+    const results = [
+      ...snap1.docs.map(mapDoc),
+      ...snap2.docs.map(mapDoc),
+    ];
+
+    // Sort by updatedAt desc
+    results.sort((a, b) => {
+      const aTime = a.updatedAt?.seconds || 0;
+      const bTime = b.updatedAt?.seconds || 0;
+      return bTime - aTime;
+    });
+
+    return results;
+  } catch (error) {
+    console.error('Error fetching kapetto kits:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetch sample kit products by pipeline lead ID
+ */
+export async function getKapettoSampleKit(leadId: string): Promise<KapettoSampleKit | null> {
+  try {
+    const kitsRef = collection(db, KAPETTO_SAMPLE_KITS_COLLECTION);
+    const q = query(kitsRef, where('pipelineLeadId', '==', leadId), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) return null;
+
+    const docSnap = snapshot.docs[0];
+    const data = docSnap.data();
+
+    return {
+      id: docSnap.id,
+      pipelineLeadId: data.pipelineLeadId || leadId,
+      products: (data.products || []).map((p: any) => ({
+        productName: p.productName || '',
+        collectionName: p.collectionName || '',
+        imageUrl: p.imageUrl || '',
+        material: p.material || '',
+        construction: p.construction || '',
+        quantity: p.quantity || 1,
+      })),
+    };
+  } catch (error) {
+    console.error('Error fetching kapetto sample kit:', error);
+    return null;
+  }
+}
+
+/**
+ * Upload kit photo to Firebase Storage and update kitPhotos array on pipeline doc
+ */
+export async function uploadKitPhoto(leadId: string, file: File): Promise<string> {
+  try {
+    const extension = file.name.split('.').pop() || 'jpg';
+    const fileName = `${Date.now()}_${file.name.replace(/\.[^.]+$/, '')}.${extension}`;
+    const storagePath = `kapetto-kits/${leadId}/${fileName}`;
+
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(storageRef);
+
+    // Update kapetto_pipeline doc: add URL to kitPhotos array
+    const docRef = doc(db, KAPETTO_PIPELINE_COLLECTION, leadId);
+    await updateDoc(docRef, {
+      kitPhotos: arrayUnion(downloadURL),
+      updatedAt: serverTimestamp(),
+    });
+
+    return downloadURL;
+  } catch (error) {
+    console.error('Error uploading kit photo:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a kit photo from storage and remove from kitPhotos array
+ */
+export async function deleteKitPhoto(leadId: string, photoUrl: string): Promise<void> {
+  try {
+    // Extract storage path from download URL
+    // Firebase Storage URLs contain the path encoded between /o/ and ?
+    const urlObj = new URL(photoUrl);
+    const pathMatch = urlObj.pathname.match(/\/o\/(.+)/);
+    if (pathMatch) {
+      const storagePath = decodeURIComponent(pathMatch[1]);
+      const storageRef = ref(storage, storagePath);
+      await deleteObject(storageRef).catch((err) => {
+        console.warn('Could not delete from storage (may already be deleted):', err);
+      });
+    }
+
+    // Remove URL from kitPhotos array on pipeline doc
+    const docRef = doc(db, KAPETTO_PIPELINE_COLLECTION, leadId);
+    await updateDoc(docRef, {
+      kitPhotos: arrayRemove(photoUrl),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error deleting kit photo:', error);
+    throw error;
+  }
 }

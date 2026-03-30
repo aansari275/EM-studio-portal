@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Package, Truck, RefreshCw, Image, CheckCircle, Grid3X3 } from 'lucide-react';
-import { getPendingDispatches, getPendingSampleBazar, getShowroomProductsGrouped } from '../lib/firebase';
+import { Camera, Package, Truck, RefreshCw, Image, CheckCircle, Grid3X3, Gift } from 'lucide-react';
+import { getPendingDispatches, getPendingSampleBazar, getShowroomProductsGrouped, getKapettoKits } from '../lib/firebase';
+import type { KapettoKit } from '../lib/firebase';
 import { cn, formatDate } from '../lib/utils';
+import { KapettoKitsList } from '../components/KapettoKitsList';
+import { KapettoKitUpload } from '../components/KapettoKitUpload';
 
-type Tab = 'dispatches' | 'sample-bazar' | 'rug-gallery';
+type Tab = 'dispatches' | 'sample-bazar' | 'rug-gallery' | 'kapetto-kits';
 
 export function StudioDashboard() {
   const navigate = useNavigate();
@@ -29,17 +32,29 @@ export function StudioDashboard() {
     refetchInterval: 60000,
   });
 
+  const { data: kapettoKits, isLoading: loadingKapettoKits, refetch: refetchKapettoKits } = useQuery({
+    queryKey: ['kapetto-kits'],
+    queryFn: getKapettoKits,
+    refetchInterval: 30000,
+  });
+
+  const [selectedKit, setSelectedKit] = useState<KapettoKit | null>(null);
+
   const isLoading = activeTab === 'dispatches'
     ? loadingDispatches
     : activeTab === 'sample-bazar'
       ? loadingSampleBazar
-      : loadingShowroom;
+      : activeTab === 'kapetto-kits'
+        ? loadingKapettoKits
+        : loadingShowroom;
 
   const handleRefresh = () => {
     if (activeTab === 'dispatches') {
       refetchDispatches();
     } else if (activeTab === 'sample-bazar') {
       refetchSampleBazar();
+    } else if (activeTab === 'kapetto-kits') {
+      refetchKapettoKits();
     }
     // Rug gallery navigates to its own page, no need to refresh here
   };
@@ -47,6 +62,7 @@ export function StudioDashboard() {
   const pendingDispatchCount = dispatches?.filter(d => !d.hasStudioPhotos).length || 0;
   const pendingSampleBazarCount = sampleBazar?.filter(s => !s.hasPhotos).length || 0;
   const showroomCount = showroomProducts?.length || 0;
+  const kapettoKitsCount = kapettoKits?.length || 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -131,12 +147,33 @@ export function StudioDashboard() {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveTab('kapetto-kits')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-3 rounded-lg font-medium transition-colors text-sm',
+                activeTab === 'kapetto-kits'
+                  ? 'bg-primary text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              )}
+            >
+              <Gift className="w-4 h-4" />
+              <span className="hidden sm:inline">Kapetto Kits</span>
+              <span className="sm:hidden">Kits</span>
+              {kapettoKitsCount > 0 && (
+                <span className={cn(
+                  'px-1.5 py-0.5 rounded-full text-xs font-bold',
+                  activeTab === 'kapetto-kits' ? 'bg-white/20' : 'bg-violet-100 text-violet-700'
+                )}>
+                  {kapettoKitsCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </header>
 
       {/* Content */}
-      <main className="max-w-2xl mx-auto px-4 py-6">
+      <main className={cn('mx-auto px-4 py-6', activeTab === 'kapetto-kits' ? 'max-w-4xl' : 'max-w-2xl')}>
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <RefreshCw className="w-8 h-8 text-gray-400 animate-spin mb-3" />
@@ -147,13 +184,26 @@ export function StudioDashboard() {
             dispatches={dispatches || []}
             onSelect={(id) => navigate(`/upload/dispatch/${id}`)}
           />
-        ) : (
+        ) : activeTab === 'sample-bazar' ? (
           <SampleBazarList
             items={sampleBazar || []}
             onSelect={(id) => navigate(`/upload/sample-bazar/${id}`)}
           />
-        )}
+        ) : activeTab === 'kapetto-kits' ? (
+          <KapettoKitsList
+            kits={kapettoKits || []}
+            onSelect={(kit) => setSelectedKit(kit)}
+          />
+        ) : null}
       </main>
+
+      {/* Kapetto Kit Upload Modal */}
+      {selectedKit && (
+        <KapettoKitUpload
+          kit={selectedKit}
+          onClose={() => setSelectedKit(null)}
+        />
+      )}
     </div>
   );
 }
