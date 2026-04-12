@@ -22,9 +22,10 @@ export function KapettoKitsList({ kits, onSelect }: KapettoKitsListProps) {
 
   const requested = kits.filter(k => k.stage === 'sample_requested');
   const sent = kits.filter(k => k.stage === 'sample_sent');
+  const followUp = kits.filter(k => k.stage === 'follow_up');
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       {/* Left column: Sample Requested */}
       <div>
         <div className="flex items-center gap-2 mb-3 px-1">
@@ -72,6 +73,30 @@ export function KapettoKitsList({ kits, onSelect }: KapettoKitsListProps) {
           )}
         </div>
       </div>
+
+      {/* Third column: Follow Up */}
+      <div>
+        <div className="flex items-center gap-2 mb-3 px-1">
+          <div className="w-2 h-2 rounded-full bg-blue-400" />
+          <h2 className="text-sm font-medium text-blue-600 uppercase tracking-wide">
+            Follow Up
+          </h2>
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
+            {followUp.length}
+          </span>
+        </div>
+        <div className="space-y-3">
+          {followUp.length === 0 ? (
+            <div className="bg-white rounded-xl border border-dashed border-blue-200 p-6 text-center">
+              <p className="text-sm text-gray-400">None in follow up</p>
+            </div>
+          ) : (
+            followUp.map((kit) => (
+              <KitCard key={kit.id} kit={kit} onSelect={onSelect} />
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -79,6 +104,7 @@ export function KapettoKitsList({ kits, onSelect }: KapettoKitsListProps) {
 function KitCard({ kit, onSelect }: { kit: KapettoKit; onSelect: (kit: KapettoKit) => void }) {
   const photoCount = kit.kitPhotos?.length || 0;
   const isRequested = kit.stage === 'sample_requested';
+  const isFollowUp = kit.stage === 'follow_up';
 
   return (
     <div
@@ -87,6 +113,8 @@ function KitCard({ kit, onSelect }: { kit: KapettoKit; onSelect: (kit: KapettoKi
         'bg-white rounded-xl p-4 hover:shadow-lg transition-all cursor-pointer',
         isRequested
           ? 'border-2 border-amber-200 hover:border-amber-300'
+          : isFollowUp
+          ? 'border border-blue-200 hover:border-blue-300'
           : 'border border-gray-200 hover:border-green-300'
       )}
     >
