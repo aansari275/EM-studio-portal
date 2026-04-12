@@ -42,7 +42,7 @@ export const storage = getStorage(app);
 
 // ─── Kapetto (kapetto-daa5e) — separate Firebase project for kapetto_* data ───
 const kapettoConfig = {
-  apiKey: 'AIzaSyD24hMDGX7ghefYzKoBeOPsPKc7KeXLtm4',
+  apiKey: import.meta.env.VITE_KAPETTO_API_KEY || '',
   authDomain: 'kapetto-daa5e.firebaseapp.com',
   projectId: 'kapetto-daa5e',
   storageBucket: 'kapetto-daa5e.firebasestorage.app',
