@@ -1176,6 +1176,53 @@ export async function uploadKitPhoto(leadId: string, file: File): Promise<string
 }
 
 /**
+ * Upload a photo for a specific product in a sample kit.
+ * 1. Uploads file to Firebase Storage
+ * 2. Updates kapetto_sample_kits.products[index].imageUrl on daa5e
+ * 3. Also appends to kitPhotos[] on the pipeline doc (backward compat for thumbnails)
+ */
+export async function uploadKitProductImage(
+  leadId: string,
+  sampleKitId: string,
+  productIndex: number,
+  file: File
+): Promise<string> {
+  try {
+    const extension = file.name.split('.').pop() || 'jpg';
+    const fileName = `${Date.now()}_product${productIndex}.${extension}`;
+    const storagePath = `kapetto-sample-kits/${sampleKitId}/products/${fileName}`;
+
+    const storageRef = ref(storage, storagePath);
+    await uploadBytes(storageRef, file);
+    const downloadURL = await getDownloadURL(storageRef);
+
+    // 1. Update the specific product's imageUrl in the sample kit doc (daa5e)
+    const kitRef = doc(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION, sampleKitId);
+    const kitSnap = await getDoc(kitRef);
+    if (kitSnap.exists()) {
+      const kitData = kitSnap.data();
+      const products = [...(kitData.products || [])];
+      if (products[productIndex]) {
+        products[productIndex] = { ...products[productIndex], imageUrl: downloadURL };
+        await updateDoc(kitRef, { products, updatedAt: serverTimestamp() });
+      }
+    }
+
+    // 2. Also append to kitPhotos on the pipeline doc (backward compat)
+    const pipelineRef = doc(dbKapetto, KAPETTO_PIPELINE_COLLECTION, leadId);
+    await updateDoc(pipelineRef, {
+      kitPhotos: arrayUnion(downloadURL),
+      updatedAt: serverTimestamp(),
+    });
+
+    return downloadURL;
+  } catch (error) {
+    console.error('Error uploading kit product image:', error);
+    throw error;
+  }
+}
+
+/**
  * Delete a kit photo from storage and remove from kitPhotos array
  */
 export async function deleteKitPhoto(leadId: string, photoUrl: string): Promise<void> {
