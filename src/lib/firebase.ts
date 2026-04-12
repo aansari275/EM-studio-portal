@@ -35,10 +35,21 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
 };
 
-// Initialize Firebase
+// Initialize Firebase — Eastern Mills (dispatches, sample bazar, showroom, rug gallery)
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+// ─── Kapetto (kapetto-daa5e) — separate Firebase project for kapetto_* data ───
+const kapettoConfig = {
+  apiKey: 'AIzaSyD24hMDGX7ghefYzKoBeOPsPKc7KeXLtm4',
+  authDomain: 'kapetto-daa5e.firebaseapp.com',
+  projectId: 'kapetto-daa5e',
+  storageBucket: 'kapetto-daa5e.firebasestorage.app',
+};
+const kapettoApp = initializeApp(kapettoConfig, 'kapetto');
+export const dbKapetto = getFirestore(kapettoApp);
+// Storage stays on EM bucket (kapetto assets live there by design)
 
 // Collection references
 const DISPATCHES_COLLECTION = 'sample_dispatches_to_buyers';
@@ -1056,17 +1067,19 @@ export async function getHeimtextilCount(): Promise<number> {
 // ============================================
 
 /**
- * Fetch pipeline leads where stage is 'sample_requested' or 'sample_sent'
+ * Fetch pipeline leads where stage is 'sample_requested', 'sample_sent', or 'follow_up'
+ * Reads from kapetto-daa5e (all kapetto_* collections migrated there 2026-04-11)
  */
 export async function getKapettoKits(): Promise<KapettoKit[]> {
   try {
-    const pipelineRef = collection(db, KAPETTO_PIPELINE_COLLECTION);
+    const pipelineRef = collection(dbKapetto, KAPETTO_PIPELINE_COLLECTION);
 
-    // Two queries: one for each stage
+    // Three queries: one per stage
     const q1 = query(pipelineRef, where('stage', '==', 'sample_requested'));
     const q2 = query(pipelineRef, where('stage', '==', 'sample_sent'));
+    const q3 = query(pipelineRef, where('stage', '==', 'follow_up'));
 
-    const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+    const [snap1, snap2, snap3] = await Promise.all([getDocs(q1), getDocs(q2), getDocs(q3)]);
 
     const mapDoc = (docSnap: any): KapettoKit => {
       const data = docSnap.data();
@@ -1086,6 +1099,7 @@ export async function getKapettoKits(): Promise<KapettoKit[]> {
     const results = [
       ...snap1.docs.map(mapDoc),
       ...snap2.docs.map(mapDoc),
+      ...snap3.docs.map(mapDoc),
     ];
 
     // Sort by updatedAt desc
@@ -1107,7 +1121,7 @@ export async function getKapettoKits(): Promise<KapettoKit[]> {
  */
 export async function getKapettoSampleKit(leadId: string): Promise<KapettoSampleKit | null> {
   try {
-    const kitsRef = collection(db, KAPETTO_SAMPLE_KITS_COLLECTION);
+    const kitsRef = collection(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION);
     const q = query(kitsRef, where('pipelineLeadId', '==', leadId), limit(1));
     const snapshot = await getDocs(q);
 
@@ -1147,8 +1161,8 @@ export async function uploadKitPhoto(leadId: string, file: File): Promise<string
     await uploadBytes(storageRef, file);
     const downloadURL = await getDownloadURL(storageRef);
 
-    // Update kapetto_pipeline doc: add URL to kitPhotos array
-    const docRef = doc(db, KAPETTO_PIPELINE_COLLECTION, leadId);
+    // Update kapetto_pipeline doc on daa5e: add URL to kitPhotos array
+    const docRef = doc(dbKapetto, KAPETTO_PIPELINE_COLLECTION, leadId);
     await updateDoc(docRef, {
       kitPhotos: arrayUnion(downloadURL),
       updatedAt: serverTimestamp(),
@@ -1178,8 +1192,8 @@ export async function deleteKitPhoto(leadId: string, photoUrl: string): Promise<
       });
     }
 
-    // Remove URL from kitPhotos array on pipeline doc
-    const docRef = doc(db, KAPETTO_PIPELINE_COLLECTION, leadId);
+    // Remove URL from kitPhotos array on pipeline doc (daa5e)
+    const docRef = doc(dbKapetto, KAPETTO_PIPELINE_COLLECTION, leadId);
     await updateDoc(docRef, {
       kitPhotos: arrayRemove(photoUrl),
       updatedAt: serverTimestamp(),
