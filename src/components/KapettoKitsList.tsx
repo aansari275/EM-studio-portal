@@ -22,12 +22,14 @@ const STAGE_CONFIG: Record<string, { label: string; dot: string; header: string;
 
 const DEFAULT_STAGE = { label: 'Other', dot: 'bg-gray-300', header: 'text-gray-500', border: 'border-gray-200 hover:border-gray-300', badge: 'bg-gray-100 text-gray-500' };
 
+// Stages to hide entirely from the Kits tab
+const HIDDEN_STAGES = new Set(['contacted']);
+
 // Preferred column order
 const STAGE_ORDER = [
   'sample_requested',
   'sample_sent',
   'follow_up',
-  'contacted',
   'won',
   'delivered_no_reply',
   'sample_resend',
@@ -48,10 +50,11 @@ export function KapettoKitsList({ kits, onSelect }: KapettoKitsListProps) {
     );
   }
 
-  // Group by stage
+  // Group by stage, skipping hidden stages
   const grouped: Record<string, KapettoKit[]> = {};
   for (const kit of kits) {
     const s = kit.stage || 'other';
+    if (HIDDEN_STAGES.has(s)) continue;
     if (!grouped[s]) grouped[s] = [];
     grouped[s].push(kit);
   }
