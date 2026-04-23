@@ -142,6 +142,8 @@ export interface KapettoSampleKitProduct {
   material: string;
   construction: string;
   quantity: number;
+  leadTime: string;
+  psfPrice: number | null;
 }
 
 export interface KapettoSampleKit {
@@ -1113,11 +1115,92 @@ export async function getKapettoKits(): Promise<KapettoKit[]> {
 /**
  * Fetch sample kit products by pipeline lead ID
  */
+// ============================================
+// Kapetto product enrichment helpers
+// ============================================
+
+function extractDesignAndColour(productName: string): [string, string] {
+  const name = productName.trim();
+  const m = name.match(/^([A-Z0-9]+-[0-9]+)/i);
+  if (!m) return [name.toUpperCase(), ''];
+  const design = m[1].toUpperCase();
+  const remainder = name.slice(m[0].length).trim();
+  let colour = '';
+  if (remainder.includes(' - ')) {
+    colour = remainder.split(' - ').slice(-1)[0].trim().toUpperCase();
+  } else if (remainder.startsWith('-') || remainder.startsWith('- ')) {
+    colour = remainder.replace(/^-\s*/, '').trim().toUpperCase();
+  } else {
+    colour = remainder.toUpperCase();
+  }
+  return [design, colour];
+}
+
+function normaliseColour(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+interface EnrichmentEntry {
+  color: string;
+  material: string;
+  construction: string;
+  leadTime: string;
+  psfPrice: number | null;
+}
+
+async function buildKitEnrichmentLookup(): Promise<Map<string, EnrichmentEntry[]>> {
+  const lookup = new Map<string, EnrichmentEntry[]>();
+  const kitsSnap = await getDocs(collection(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION));
+  for (const docSnap of kitsSnap.docs) {
+    const data = docSnap.data();
+    for (const p of (data.products || [])) {
+      const mat: string = (p.material || '').trim();
+      const con: string = (p.construction || '').trim();
+      if (!mat && !con) continue;
+      const [design, colour] = extractDesignAndColour(p.productName || '');
+      const entry: EnrichmentEntry = {
+        color: colour,
+        material: mat,
+        construction: con,
+        leadTime: p.leadTime || '',
+        psfPrice: p.psfPrice != null ? Number(p.psfPrice) : null,
+      };
+      if (!lookup.has(design)) lookup.set(design, []);
+      lookup.get(design)!.push(entry);
+    }
+  }
+  return lookup;
+}
+
+function findEnrichment(productName: string, lookup: Map<string, EnrichmentEntry[]>): EnrichmentEntry | null {
+  const [design, colour] = extractDesignAndColour(productName);
+  const entries = lookup.get(design);
+  if (!entries || entries.length === 0) return null;
+  const nc = normaliseColour(colour);
+  const ncWords = new Set(nc.split(' ').filter(Boolean));
+
+  // 1. Exact
+  for (const e of entries) {
+    if (normaliseColour(e.color) === nc) return e;
+  }
+  // 2. All query words in entry
+  for (const e of entries) {
+    const ecWords = new Set(normaliseColour(e.color).split(' ').filter(Boolean));
+    if (ncWords.size > 0 && [...ncWords].every(w => ecWords.has(w))) return e;
+  }
+  // 3. All entry words in query
+  for (const e of entries) {
+    const ecWords = new Set(normaliseColour(e.color).split(' ').filter(Boolean));
+    if (ecWords.size > 0 && [...ecWords].every(w => ncWords.has(w))) return e;
+  }
+  return null;
+}
+
 export async function getKapettoSampleKit(leadId: string): Promise<KapettoSampleKit | null> {
   try {
     const kitsRef = collection(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION);
     const q = query(kitsRef, where('pipelineLeadId', '==', leadId), limit(1));
-    const snapshot = await getDocs(q);
+    const [snapshot, lookup] = await Promise.all([getDocs(q), buildKitEnrichmentLookup()]);
 
     if (snapshot.empty) return null;
 
@@ -1127,14 +1210,21 @@ export async function getKapettoSampleKit(leadId: string): Promise<KapettoSample
     return {
       id: docSnap.id,
       pipelineLeadId: data.pipelineLeadId || leadId,
-      products: (data.products || []).map((p: any) => ({
-        productName: p.productName || '',
-        collectionName: p.collectionName || '',
-        imageUrl: p.imageUrl || '',
-        material: p.material || '',
-        construction: p.construction || '',
-        quantity: p.quantity || 1,
-      })),
+      products: (data.products || []).map((p: any) => {
+        const hasMat = !!(p.material || '').trim();
+        const hasCon = !!(p.construction || '').trim();
+        const enriched = (!hasMat || !hasCon) ? findEnrichment(p.productName || '', lookup) : null;
+        return {
+          productName: p.productName || '',
+          collectionName: p.collectionName || '',
+          imageUrl: p.imageUrl || '',
+          material: (p.material || '').trim() || enriched?.material || '',
+          construction: (p.construction || '').trim() || enriched?.construction || '',
+          quantity: p.quantity || 1,
+          leadTime: (p.leadTime || '').trim() || enriched?.leadTime || '',
+          psfPrice: p.psfPrice != null ? Number(p.psfPrice) : enriched?.psfPrice ?? null,
+        };
+      }),
     };
   } catch (error) {
     console.error('Error fetching kapetto sample kit:', error);

@@ -175,13 +175,19 @@ export function KapettoKitUpload({ kit, onClose }: KapettoKitUploadProps) {
 
                     {/* Product info */}
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">{product.productName}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{product.productName}</p>
+                      <div className="flex flex-wrap items-center gap-1 mt-1">
                         {product.material && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">{product.material}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 font-medium">{product.material}</span>
                         )}
                         {product.construction && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">{product.construction}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-700 font-medium">{product.construction}</span>
+                        )}
+                        {product.leadTime && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{product.leadTime}</span>
+                        )}
+                        {product.psfPrice != null && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">${product.psfPrice}/sqft</span>
                         )}
                       </div>
                     </div>
