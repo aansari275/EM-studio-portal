@@ -129,6 +129,7 @@ export interface KapettoKit {
   title?: string;
   segment?: string;
   stage: string;
+  designerCode?: string;
   kitPhotos?: string[];
   sampleKitId?: string;
   updatedAt: any;
@@ -1067,19 +1068,15 @@ export async function getHeimtextilCount(): Promise<number> {
 // ============================================
 
 /**
- * Fetch pipeline leads where stage is 'sample_requested', 'sample_sent', or 'follow_up'
+ * Fetch all pipeline leads (all stages) for the Kapetto Kits tab.
  * Reads from kapetto-daa5e (all kapetto_* collections migrated there 2026-04-11)
  */
 export async function getKapettoKits(): Promise<KapettoKit[]> {
   try {
     const pipelineRef = collection(dbKapetto, KAPETTO_PIPELINE_COLLECTION);
 
-    // Three queries: one per stage
-    const q1 = query(pipelineRef, where('stage', '==', 'sample_requested'));
-    const q2 = query(pipelineRef, where('stage', '==', 'sample_sent'));
-    const q3 = query(pipelineRef, where('stage', '==', 'follow_up'));
-
-    const [snap1, snap2, snap3] = await Promise.all([getDocs(q1), getDocs(q2), getDocs(q3)]);
+    // Fetch all leads — no stage filter
+    const snap = await getDocs(pipelineRef);
 
     const mapDoc = (docSnap: any): KapettoKit => {
       const data = docSnap.data();
@@ -1090,17 +1087,14 @@ export async function getKapettoKits(): Promise<KapettoKit[]> {
         title: data.title || '',
         segment: data.segment || '',
         stage: data.stage || '',
+        designerCode: data.designerCode || '',
         kitPhotos: data.kitPhotos || [],
         sampleKitId: data.sampleKitId || '',
         updatedAt: data.updatedAt || data.createdAt || null,
       };
     };
 
-    const results = [
-      ...snap1.docs.map(mapDoc),
-      ...snap2.docs.map(mapDoc),
-      ...snap3.docs.map(mapDoc),
-    ];
+    const results = snap.docs.map(mapDoc);
 
     // Sort by updatedAt desc
     results.sort((a, b) => {

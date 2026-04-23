@@ -7,6 +7,34 @@ interface KapettoKitsListProps {
   onSelect: (kit: KapettoKit) => void;
 }
 
+// Human-readable stage labels and colours
+const STAGE_CONFIG: Record<string, { label: string; dot: string; header: string; border: string; badge: string }> = {
+  sample_requested:   { label: 'Sample Requested',    dot: 'bg-amber-400',  header: 'text-amber-600',  border: 'border-amber-200 hover:border-amber-300',  badge: 'bg-amber-100 text-amber-700' },
+  sample_sent:        { label: 'Sample Sent',          dot: 'bg-green-400',  header: 'text-green-600',  border: 'border-green-200 hover:border-green-300',   badge: 'bg-green-100 text-green-700' },
+  follow_up:          { label: 'Follow Up',            dot: 'bg-blue-400',   header: 'text-blue-600',   border: 'border-blue-200 hover:border-blue-300',     badge: 'bg-blue-100 text-blue-700' },
+  contacted:          { label: 'Contacted',            dot: 'bg-sky-400',    header: 'text-sky-600',    border: 'border-sky-200 hover:border-sky-300',       badge: 'bg-sky-100 text-sky-700' },
+  won:                { label: 'Won',                  dot: 'bg-emerald-500',header: 'text-emerald-700',border: 'border-emerald-200 hover:border-emerald-300',badge: 'bg-emerald-100 text-emerald-700' },
+  delivered_no_reply: { label: 'Delivered – No Reply', dot: 'bg-orange-400', header: 'text-orange-600', border: 'border-orange-200 hover:border-orange-300', badge: 'bg-orange-100 text-orange-700' },
+  sample_resend:      { label: 'Sample Resend',        dot: 'bg-pink-400',   header: 'text-pink-600',   border: 'border-pink-200 hover:border-pink-300',     badge: 'bg-pink-100 text-pink-700' },
+  not_interested:     { label: 'Not Interested',       dot: 'bg-gray-400',   header: 'text-gray-500',   border: 'border-gray-200 hover:border-gray-300',     badge: 'bg-gray-100 text-gray-500' },
+  no_show:            { label: 'No Show',              dot: 'bg-gray-300',   header: 'text-gray-400',   border: 'border-gray-100 hover:border-gray-200',     badge: 'bg-gray-50 text-gray-400' },
+};
+
+const DEFAULT_STAGE = { label: 'Other', dot: 'bg-gray-300', header: 'text-gray-500', border: 'border-gray-200 hover:border-gray-300', badge: 'bg-gray-100 text-gray-500' };
+
+// Preferred column order
+const STAGE_ORDER = [
+  'sample_requested',
+  'sample_sent',
+  'follow_up',
+  'contacted',
+  'won',
+  'delivered_no_reply',
+  'sample_resend',
+  'not_interested',
+  'no_show',
+];
+
 export function KapettoKitsList({ kits, onSelect }: KapettoKitsListProps) {
   if (!kits.length) {
     return (
@@ -15,110 +43,73 @@ export function KapettoKitsList({ kits, onSelect }: KapettoKitsListProps) {
           <CheckCircle className="w-8 h-8 text-gray-400" />
         </div>
         <h3 className="text-lg font-semibold text-gray-900 mb-1">No kits yet</h3>
-        <p className="text-sm text-gray-500">No sample kits in the pipeline</p>
+        <p className="text-sm text-gray-500">No pipeline leads found</p>
       </div>
     );
   }
 
-  const requested = kits.filter(k => k.stage === 'sample_requested');
-  const sent = kits.filter(k => k.stage === 'sample_sent');
-  const followUp = kits.filter(k => k.stage === 'follow_up');
+  // Group by stage
+  const grouped: Record<string, KapettoKit[]> = {};
+  for (const kit of kits) {
+    const s = kit.stage || 'other';
+    if (!grouped[s]) grouped[s] = [];
+    grouped[s].push(kit);
+  }
+
+  // Build ordered stage list: known stages first (in order), then anything else
+  const orderedStages = [
+    ...STAGE_ORDER.filter(s => grouped[s]?.length),
+    ...Object.keys(grouped).filter(s => !STAGE_ORDER.includes(s) && grouped[s]?.length),
+  ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      {/* Left column: Sample Requested */}
-      <div>
-        <div className="flex items-center gap-2 mb-3 px-1">
-          <div className="w-2 h-2 rounded-full bg-amber-400" />
-          <h2 className="text-sm font-medium text-amber-600 uppercase tracking-wide">
-            Sample Requested
-          </h2>
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
-            {requested.length}
-          </span>
-        </div>
-        <div className="space-y-3">
-          {requested.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-amber-200 p-6 text-center">
-              <p className="text-sm text-gray-400">None pending</p>
+    <div className="space-y-8">
+      {orderedStages.map(stage => {
+        const cfg = STAGE_CONFIG[stage] || { ...DEFAULT_STAGE, label: stage };
+        const stageKits = grouped[stage];
+        return (
+          <div key={stage}>
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <div className={cn('w-2 h-2 rounded-full', cfg.dot)} />
+              <h2 className={cn('text-sm font-medium uppercase tracking-wide', cfg.header)}>
+                {cfg.label}
+              </h2>
+              <span className={cn('px-1.5 py-0.5 rounded-full text-xs font-bold', cfg.badge)}>
+                {stageKits.length}
+              </span>
             </div>
-          ) : (
-            requested.map((kit) => (
-              <KitCard key={kit.id} kit={kit} onSelect={onSelect} />
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Right column: Sample Sent */}
-      <div>
-        <div className="flex items-center gap-2 mb-3 px-1">
-          <div className="w-2 h-2 rounded-full bg-green-400" />
-          <h2 className="text-sm font-medium text-green-600 uppercase tracking-wide">
-            Sample Sent
-          </h2>
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
-            {sent.length}
-          </span>
-        </div>
-        <div className="space-y-3">
-          {sent.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-green-200 p-6 text-center">
-              <p className="text-sm text-gray-400">None sent</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {stageKits.map(kit => (
+                <KitCard key={kit.id} kit={kit} onSelect={onSelect} stageCfg={cfg} />
+              ))}
             </div>
-          ) : (
-            sent.map((kit) => (
-              <KitCard key={kit.id} kit={kit} onSelect={onSelect} />
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Third column: Follow Up */}
-      <div>
-        <div className="flex items-center gap-2 mb-3 px-1">
-          <div className="w-2 h-2 rounded-full bg-blue-400" />
-          <h2 className="text-sm font-medium text-blue-600 uppercase tracking-wide">
-            Follow Up
-          </h2>
-          <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
-            {followUp.length}
-          </span>
-        </div>
-        <div className="space-y-3">
-          {followUp.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-blue-200 p-6 text-center">
-              <p className="text-sm text-gray-400">None in follow up</p>
-            </div>
-          ) : (
-            followUp.map((kit) => (
-              <KitCard key={kit.id} kit={kit} onSelect={onSelect} />
-            ))
-          )}
-        </div>
-      </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function KitCard({ kit, onSelect }: { kit: KapettoKit; onSelect: (kit: KapettoKit) => void }) {
+function KitCard({
+  kit,
+  onSelect,
+  stageCfg,
+}: {
+  kit: KapettoKit;
+  onSelect: (kit: KapettoKit) => void;
+  stageCfg: typeof DEFAULT_STAGE;
+}) {
   const photoCount = kit.kitPhotos?.length || 0;
-  const isRequested = kit.stage === 'sample_requested';
-  const isFollowUp = kit.stage === 'follow_up';
 
   return (
     <div
       onClick={() => onSelect(kit)}
       className={cn(
-        'bg-white rounded-xl p-4 hover:shadow-lg transition-all cursor-pointer',
-        isRequested
-          ? 'border-2 border-amber-200 hover:border-amber-300'
-          : isFollowUp
-          ? 'border border-blue-200 hover:border-blue-300'
-          : 'border border-gray-200 hover:border-green-300'
+        'bg-white rounded-xl p-4 hover:shadow-lg transition-all cursor-pointer border',
+        stageCfg.border
       )}
     >
-      <div className="flex items-start justify-between mb-2">
+      <div className="flex items-start justify-between mb-1">
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-gray-900 truncate">{kit.name || 'Unknown'}</h3>
           <p className="text-sm text-gray-500 truncate">{kit.company || 'No company'}</p>
@@ -134,6 +125,16 @@ function KitCard({ kit, onSelect }: { kit: KapettoKit; onSelect: (kit: KapettoKi
           </span>
         )}
       </div>
+
+      {/* KD Code badge */}
+      {kit.designerCode && (
+        <div className="mb-2">
+          <span className="inline-block px-2 py-0.5 bg-gray-900 text-white rounded text-xs font-mono font-semibold">
+            {kit.designerCode}
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-end">
         {photoCount > 0 ? (
           <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium flex items-center gap-1">
