@@ -1334,3 +1334,77 @@ export async function deleteKitPhoto(leadId: string, photoUrl: string): Promise<
     throw error;
   }
 }
+
+/**
+ * Create a new kapetto_sample_kits doc for a pipeline lead (if one doesn't exist).
+ * Returns the kit doc ID.
+ */
+export async function createKapettoSampleKit(leadId: string, leadName: string, leadCompany: string): Promise<string> {
+  const kitsRef = collection(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION);
+  const q = query(kitsRef, where('pipelineLeadId', '==', leadId), limit(1));
+  const snap = await getDocs(q);
+  if (!snap.empty) return snap.docs[0].id;
+
+  const newKit = {
+    pipelineLeadId: leadId,
+    leadName,
+    leadCompany,
+    products: [],
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  const docRef = await addDoc(kitsRef, newKit);
+  return docRef.id;
+}
+
+/**
+ * Save (add or update) a product entry in a sample kit.
+ * If productIndex is -1, appends a new product. Otherwise updates in place.
+ */
+export async function upsertKapettoKitProduct(
+  kitId: string,
+  productIndex: number,
+  product: {
+    productName: string;
+    material: string;
+    construction: string;
+    leadTime: string;
+    psfPrice: number | null;
+    imageUrl?: string;
+  }
+): Promise<void> {
+  const kitRef = doc(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION, kitId);
+  const kitSnap = await getDoc(kitRef);
+  if (!kitSnap.exists()) throw new Error('Kit not found');
+  const products = [...(kitSnap.data().products || [])];
+  const entry = {
+    productName: product.productName,
+    material: product.material,
+    construction: product.construction,
+    leadTime: product.leadTime,
+    psfPrice: product.psfPrice,
+    imageUrl: product.imageUrl ?? (productIndex >= 0 ? products[productIndex]?.imageUrl ?? '' : ''),
+    images: productIndex >= 0 ? products[productIndex]?.images ?? [] : [],
+    quantity: 1,
+    collectionName: '',
+  };
+  if (productIndex === -1) {
+    products.push(entry);
+  } else {
+    products[productIndex] = entry;
+  }
+  await updateDoc(kitRef, { products, updatedAt: serverTimestamp() });
+}
+
+/**
+ * Delete a product entry from a sample kit by index.
+ */
+export async function deleteKapettoKitProduct(kitId: string, productIndex: number): Promise<void> {
+  const kitRef = doc(dbKapetto, KAPETTO_SAMPLE_KITS_COLLECTION, kitId);
+  const kitSnap = await getDoc(kitRef);
+  if (!kitSnap.exists()) throw new Error('Kit not found');
+  const products = [...(kitSnap.data().products || [])];
+  products.splice(productIndex, 1);
+  await updateDoc(kitRef, { products, updatedAt: serverTimestamp() });
+}
