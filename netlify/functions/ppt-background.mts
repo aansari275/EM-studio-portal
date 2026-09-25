@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, resolveMany, type Product } from '../lib/em.mjs';
-import { buildPptx, setAssetsBase, deckFileName } from '../../src/lib/pptGenerator.js';
 
 /**
  * Builds a deck and uploads it, out of band.
@@ -61,6 +60,15 @@ export default async (req: Request) => {
     updateDoc(jobRef, { status: 'failed', error: msg, updatedAt: serverTimestamp() });
 
   try {
+    // Recorded first so a failure in here is distinguishable from never
+    // having been invoked at all.
+    await updateDoc(jobRef, { status: 'started', updatedAt: serverTimestamp() });
+
+    // Imported lazily so a module-level failure lands in the job record
+    // rather than killing the invocation silently.
+    const { buildPptx, setAssetsBase, deckFileName } =
+      await import('../../src/lib/pptGenerator.js');
+
     const snap = await getDoc(jobRef);
     if (!snap.exists()) return new Response('no such job', { status: 404 });
     const job = snap.data() as { styles: string[]; title: string };
