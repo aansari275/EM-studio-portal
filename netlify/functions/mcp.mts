@@ -187,14 +187,13 @@ async function callTool(name: string, args: any, origin: string) {
       styles, title: String(args?.title || 'Eastern Mills'),
       status: 'queued', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     });
-    // Fire and forget: a background function replies 202 and keeps working.
-    fetch(`${origin}/.netlify/functions/ppt-background`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jobId, token: process.env.MCP_TOKEN }),
-    }).catch(() => {});
-    return text(`Building a deck of ${styles.length} style(s). Job id: ${jobId}\n`
-      + `Call get_ppt with that id in about 20 seconds.`);
+    // The job is picked up by the builder running beside the slide archive.
+    // Netlify background functions are accepted but never executed on this
+    // site's plan, and a synchronous function's ten seconds will not fetch a
+    // hundred photographs — so the deck is built where build_deck.py lives,
+    // which also keeps connector decks identical to hand-built ones.
+    return text(`Queued a deck of ${styles.length} style(s). Job id: ${jobId}\n`
+      + `Call get_ppt with that id in about 30 seconds.`);
   }
 
   if (name === 'get_ppt') {
