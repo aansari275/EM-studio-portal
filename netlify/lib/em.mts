@@ -98,10 +98,22 @@ export async function search(term: string, max = 50): Promise<Product[]> {
   return dedupe((await Promise.all(jobs)).flat()).slice(0, max);
 }
 
-/** Every colourway recorded for one style. */
+/**
+ * Every colourway recorded for one style.
+ *
+ * The caller usually writes the style the way it appears on a selection sheet
+ * ("23-6744"), which is not the stored key ("23-MA-6744"), so an exact match
+ * has to fall back to resolving the real key first.
+ */
 export async function colourways(style: string): Promise<Product[]> {
-  const key = normStyle(style);
+  let key = normStyle(style);
   if (!key) return [];
+  const direct = await run(
+    query(collection(db(), 'em_products'), where('styleKey', '==', key), qlimit(1)), fromEm);
+  if (!direct.length) {
+    const resolved = await search(style, 1);
+    if (resolved.length) key = normStyle(resolved[0].style);
+  }
   const [em, show] = await Promise.all([
     run(query(collection(db(), 'em_products'), where('styleKey', '==', key), qlimit(60)), fromEm),
     run(query(collection(db(), 'showroom_products'),
