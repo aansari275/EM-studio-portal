@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Check, X } from 'lucide-react';
+import { type ShowroomProduct } from '../lib/firebase';
 import {
-  getShowroomProducts,
-  searchShowroomProducts,
-  getShowroomProductsCount,
-  getDesignVariants,
-  type ShowroomProduct,
-} from '../lib/firebase';
+  getLibraryProducts,
+  searchLibrary,
+  getLibraryCount,
+  getLibraryVariants,
+} from '../lib/library';
 import { useSelection } from '../lib/selection';
 import { generateProductPPT } from '../lib/pptGenerator';
 import { createCatalog, catalogUrl } from '../lib/catalogs';
@@ -41,11 +41,11 @@ export function Library() {
     return () => clearTimeout(t);
   }, [term]);
 
-  const { data: total } = useQuery({ queryKey: ['showroom-count'], queryFn: getShowroomProductsCount });
+  const { data: total } = useQuery({ queryKey: ['library-count'], queryFn: getLibraryCount });
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['library', debounced],
-    queryFn: () => (debounced ? searchShowroomProducts(debounced, 300) : getShowroomProducts(200)),
+    queryFn: () => (debounced ? searchLibrary(debounced, 300) : getLibraryProducts(200)),
   });
 
   // Only offer years that are actually present in what loaded.
@@ -253,7 +253,7 @@ function Detail({ product, onClose }: { product: ShowroomProduct; onClose: () =>
 
   const { data: variants = [] } = useQuery({
     queryKey: ['variants', product.baseStyleNumber],
-    queryFn: () => getDesignVariants(product.baseStyleNumber),
+    queryFn: () => getLibraryVariants(product.baseStyleNumber),
     enabled: !!product.baseStyleNumber,
   });
 
