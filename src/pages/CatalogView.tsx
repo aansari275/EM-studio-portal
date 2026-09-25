@@ -49,10 +49,14 @@ export function CatalogView() {
         {data.items.map((it, i) => (
           <figure key={`${it.styleNumber}-${i}`} className="m-0">
             <div className="aspect-[4/5] overflow-hidden rounded-sm bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05)]">
+              {/* The first row is what the buyer sees on opening, so it must not
+                  wait on an intersection check. Everything below stays lazy. */}
               <img
                 src={thumb(it.image, 700)}
                 alt={it.displayName}
-                loading="lazy"
+                loading={i < 4 ? 'eager' : 'lazy'}
+                fetchPriority={i < 4 ? 'high' : 'auto'}
+                decoding="async"
                 className="h-full w-full object-cover"
               />
             </div>
