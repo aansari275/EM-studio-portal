@@ -1,4 +1,4 @@
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import {
   db, search, colourways, resolveMany, normStyle, type Product,
   collection, query, orderBy, qlimit, getDocs,
@@ -90,6 +90,33 @@ const TOOLS = [
     },
   },
   {
+    name: 'build_ppt',
+    description:
+      'Generate a PowerPoint deck from a list of style numbers — intro slides, one slide '
+      + 'per rug, outro slides, in the standard Eastern Mills layout. Building takes up to '
+      + 'a couple of minutes, so this returns a job id; call get_ppt with it to get the '
+      + 'download link.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        styles: { type: 'array', items: { type: 'string' }, description: 'Style numbers' },
+        title: { type: 'string', description: 'Deck title (default "Eastern Mills")' },
+      },
+      required: ['styles'],
+    },
+  },
+  {
+    name: 'get_ppt',
+    description:
+      'Check a deck build and get its download link once ready. Call this a few seconds '
+      + 'after build_ppt, and again if it is still building.',
+    inputSchema: {
+      type: 'object',
+      properties: { job_id: { type: 'string' } },
+      required: ['job_id'],
+    },
+  },
+  {
     name: 'list_catalogs',
     description: 'Recently created buyer catalogs with their links.',
     inputSchema: {
@@ -150,6 +177,39 @@ async function callTool(name: string, args: any, origin: string) {
     const photoNote = noPhoto ? `\n${noPhoto} skipped for having no photo.` : '';
     return text(`Catalog for ${args?.buyer}: ${origin}/c/${id}\n`
       + `${withPhotos.length} rug(s).${photoNote}${note}`);
+  }
+
+  if (name === 'build_ppt') {
+    const styles: string[] = Array.isArray(args?.styles) ? args.styles.map(String) : [];
+    if (!styles.length) return text('Give at least one style number.');
+    const jobId = makeId(10);
+    await setDoc(doc(db(), 'ppt_jobs', jobId), {
+      styles, title: String(args?.title || 'Eastern Mills'),
+      status: 'queued', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    });
+    // Fire and forget: a background function replies 202 and keeps working.
+    fetch(`${origin}/.netlify/functions/ppt-background`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jobId, token: process.env.MCP_TOKEN }),
+    }).catch(() => {});
+    return text(`Building a deck of ${styles.length} style(s). Job id: ${jobId}\n`
+      + `Call get_ppt with that id in about 20 seconds.`);
+  }
+
+  if (name === 'get_ppt') {
+    const id = String(args?.job_id || '');
+    if (!id) return text('Give the job id returned by build_ppt.');
+    const snap = await getDoc(doc(db(), 'ppt_jobs', id));
+    if (!snap.exists()) return text(`No job ${id}.`);
+    const j = snap.data() as any;
+    if (j.status === 'ready') {
+      const miss = j.missing?.length ? `\nNot found: ${j.missing.join(', ')}` : '';
+      return text(`Ready — ${j.products} rug(s), ${j.slides} slides, `
+        + `${Math.round((j.bytes || 0) / 1e6)} MB.\n${j.url}${miss}`);
+    }
+    if (j.status === 'failed') return text(`Build failed: ${j.error || 'unknown error'}`);
+    return text(`Still ${j.status}. Try get_ppt again shortly.`);
   }
 
   if (name === 'list_catalogs') {

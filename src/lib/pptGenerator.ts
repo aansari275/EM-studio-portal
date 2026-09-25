@@ -20,17 +20,28 @@ const FONTS = {
   dotum: 'Dotum',
 };
 
-// PPT Assets base URL (deployed on same domain)
-const ASSETS_BASE = '/ppt-assets';
+// PPT Assets base. Same-origin in the browser; the server-side generator
+// points this at a local directory, because pptxgenjs under Node reads image
+// paths off the filesystem rather than fetching them.
+let ASSETS_BASE = '/ppt-assets';
+
+/** Used by the Netlify function that builds decks outside the browser. */
+export function setAssetsBase(base: string) {
+  ASSETS_BASE = base;
+}
 
 /**
  * Generate a PowerPoint presentation matching EMPL template
  * Structure: 2 intro slides + product slides + 3 outro slides
  */
-export async function generateProductPPT(
+/**
+ * Assemble the deck. Everything except writing it out, so the browser and the
+ * MCP connector share one layout instead of drifting apart.
+ */
+export function buildPptx(
   products: ShowroomProduct[],
   title: string = 'Eastern Mills'
-): Promise<void> {
+): pptxgen {
   const pptx = new pptxgen();
 
   // Set presentation properties
@@ -57,9 +68,17 @@ export async function generateProductPPT(
   addOutroSlide2(pptx); // Factory views with certifications
   addOutroSlide3(pptx); // Contact Us
 
-  // Save the file
-  const fileName = `Eastern_Mills_Gallery_${new Date().toISOString().split('T')[0]}.pptx`;
-  await pptx.writeFile({ fileName });
+  return pptx;
+}
+
+export const deckFileName = () =>
+  `Eastern_Mills_Gallery_${new Date().toISOString().split('T')[0]}.pptx`;
+
+export async function generateProductPPT(
+  products: ShowroomProduct[],
+  title: string = 'Eastern Mills'
+): Promise<void> {
+  await buildPptx(products, title).writeFile({ fileName: deckFileName() });
 }
 
 /**
