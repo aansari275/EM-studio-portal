@@ -57,3 +57,8 @@ export function signOutUser() {
 export function watchAuth(cb: (user: User | null) => void) {
   return onAuthStateChanged(auth, cb);
 }
+
+/** Email of the signed-in studio user, or null. Used to stamp who made a catalog. */
+export function currentUserEmail(): string | null {
+  return auth.currentUser?.email ?? null;
+}

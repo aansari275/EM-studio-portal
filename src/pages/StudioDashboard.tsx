@@ -10,9 +10,9 @@ import { KapettoKitUpload } from '../components/KapettoKitUpload';
 
 type Tab = 'dispatches' | 'sample-bazar' | 'rug-gallery' | 'kapetto-kits';
 
-export function StudioDashboard() {
+export function StudioDashboard({ initialTab = 'dispatches' }: { initialTab?: Tab } = {}) {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<Tab>('dispatches');
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
 
   const { data: dispatches, isLoading: loadingDispatches, refetch: refetchDispatches } = useQuery({
     queryKey: ['pending-dispatches'],

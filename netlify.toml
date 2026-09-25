@@ -8,6 +8,9 @@
   to = "/index.html"
   status = 200
 
+[images]
+  remote_images = ["https://firebasestorage\\.googleapis\\.com/.*"]
+
 [functions]
   node_bundler = "esbuild"
   included_files = ["netlify/functions/**"]
