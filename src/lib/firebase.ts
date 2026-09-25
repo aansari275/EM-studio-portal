@@ -1409,3 +1409,23 @@ export async function deleteKapettoKitProduct(kitId: string, productIndex: numbe
   products.splice(productIndex, 1);
   await updateDoc(kitRef, { products, updatedAt: serverTimestamp() });
 }
+
+/**
+ * Colour variants of one design, queried properly.
+ *
+ * getShowroomProductsByDesign above pulls the 50 newest products and filters in
+ * memory, so any design outside that window comes back empty. This asks
+ * Firestore for the design directly.
+ */
+export async function getDesignVariants(baseStyleNumber: string): Promise<ShowroomProduct[]> {
+  if (!baseStyleNumber) return [];
+  try {
+    const snapshot = await getDocs(
+      query(collection(db, SHOWROOM_COLLECTION), where('baseStyleNumber', '==', baseStyleNumber), limit(60))
+    );
+    return snapshot.docs.map((d) => mapShowroomDoc(d));
+  } catch (error) {
+    console.error('Error fetching design variants:', error);
+    return [];
+  }
+}

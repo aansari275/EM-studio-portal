@@ -1,4 +1,5 @@
 import pptxgen from 'pptxgenjs';
+import { orderedImages } from './img';
 import type { ShowroomProduct } from './firebase';
 
 // Brand colors (matching EMPL template)
@@ -155,12 +156,10 @@ function addIntroSlide2(pptx: pptxgen) {
 function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   const slide = pptx.addSlide();
 
-  // Collect all images
-  const images: string[] = [];
-  if (product.firebaseUrl) images.push(product.firebaseUrl);
-  if (product.additionalImages) {
-    images.push(...product.additionalImages.filter(Boolean));
-  }
+  // Hero first. firebaseUrl is a numbered detail frame on ~68% of products, so
+  // using it as images[0] put a corner close-up in the big slot and left the
+  // full-rug shot as a small thumbnail. orderedImages corrects the order.
+  const images: string[] = orderedImages(product);
 
   // === TOP RIGHT: Logo ICON (not full logo) ===
   slide.addShape('rect', {

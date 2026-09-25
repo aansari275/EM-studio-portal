@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, orderBy, limit, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import type { ShowroomProduct } from './firebase';
+import { heroImage } from './img';
 
 /**
  * Shareable buyer catalogs.
@@ -44,7 +45,7 @@ function toItem(p: ShowroomProduct): CatalogItem {
   const item: CatalogItem = {
     styleNumber: p.styleNumber || p.baseStyleNumber || '',
     displayName: p.displayName || p.baseStyleNumber || 'Untitled',
-    image: p.firebaseUrl || '',
+    image: heroImage(p),
   };
   // Firestore rejects undefined, so only set what we actually have.
   if (p.construction) item.construction = p.construction;
@@ -59,7 +60,7 @@ export async function createCatalog(
   buyer: string,
   createdBy?: string
 ): Promise<string> {
-  const withPhotos = products.filter((p) => p.firebaseUrl);
+  const withPhotos = products.filter((p) => heroImage(p));
   if (!withPhotos.length) throw new Error('None of the selected rugs have a photo yet.');
 
   const id = makeId();
