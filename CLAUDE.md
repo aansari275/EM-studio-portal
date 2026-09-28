@@ -46,6 +46,84 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 | Lifestyle | No | Styled/room setting |
 | Close-up | No | Material/weave detail |
 
+## What the product data actually contains — read before building any filter
+
+Measured 2026-09-25 over a 1,500-2,000 product sample of `showroom_products`.
+The TypeScript interface promises far more than the data delivers.
+
+| Field | Actually filled |
+|---|---|
+| `styleNumber`, `source`, `createdAt` | 100% |
+| `baseStyleNumber`, `displayName`, `firebaseUrl`, `category` | 99.9% |
+| `additionalImages` | 88.9% |
+| `color` | 8.9%, and the values are `V1`, `V2`, `B`, `OPT-1` — variant codes, not colours |
+| **`construction`** | **0%** |
+| **`materials`** | **0%** |
+| `gsm`, `size`, `tags` | ~0.1% |
+
+`category` is filled on 99.9% of products and reads `Area Rug` on every single
+one, so it is useless as a filter.
+
+The first version of the library shipped with Hand Knotted / Hand Tufted / Silk
+/ Wool filters built from the interface. None of them could ever match. Filters
+now derive the **year** from the style number (`EM-23-MA-6255` → 2023), which is
+the only fact the data reliably carries, and only years actually present in the
+loaded set are offered.
+
+### The hero image is wrong on ~68% of products
+
+`products_migration` set `firebaseUrl` to a numbered detail frame
+(`image-2.jpg`, `image-10.jpg`) and pushed the file actually named `main.jpg`
+into `additionalImages`. Over a 2,000-product sample:
+
+- 8.3% — hero already is `main.*`
+- **68.5% — `main.*` buried in `additionalImages`, hero is a close-up**
+- 23.1% — no `main.*` anywhere
+
+The visible symptom was a PPT slide leading with a corner close-up while the
+full rug sat in a small thumbnail slot.
+
+**Fixed in code, deliberately not in the data.** `heroImage()` / `orderedImages()`
+in `src/lib/img.ts` prefer `main.*` and fall back to the old behaviour. A bulk
+rewrite of 9,600 documents is not reversible and other apps read this
+collection. If the data is ever corrected at source, these helpers become
+no-ops rather than needing removal.
+
+Anything that picks a product photo must go through `heroImage()`. Four places
+do: the library card, the detail dialog, `catalogs.ts` (buyer links) and
+`pptGenerator.ts`.
+
+### Images are full studio originals
+
+3500-4000px, 0.6-11 MB each. A six-rug buyer link was 19.2 MB before
+thumbnails. `thumb()` routes through Netlify Image CDN (`/.netlify/images`),
+which needs `[images] remote_images` in `netlify.toml` and only exists on the
+deployed site — dev serves originals. Measured: 2.4 MB → 163 KB, a 93% cut.
+
+### getShowroomProductsByDesign is broken
+
+It pulls the 50 newest products and filters in memory, so any design outside
+that window returns nothing. Use `getDesignVariants()` instead, which queries
+by `baseStyleNumber`. The old function is left alone because RugGallery uses it.
+
+## Security: this project's Firestore and Storage are wide open
+
+As of 2026-09-25 both rulesets are literally:
+
+```
+allow read, write: if true;
+```
+
+Anyone who knows the project id (`easternmillscom`, which is in
+`src/lib/firebase.ts`) can read `costings` including `profitINR`, and can write
+or delete any document. Verified from an unauthenticated shell.
+
+**Not fixed, on purpose.** Every Eastern Mills app currently depends on open
+rules, so a global lockdown breaks all of them at once. Suggested order when it
+is tackled: make the repos private, close writes before reads, then reads
+collection by collection starting with `costings` (the MCP reads it through a
+service account, which bypasses rules, so little should break).
+
 ## Firebase Collections
 - **`sample_dispatches_to_buyers`** - Dispatch documents with photos array
 - **`sample_bazar`** - Product documents with two photo fields:
