@@ -53,6 +53,38 @@ function tidy(v: unknown): string {
   return t;
 }
 
+
+/**
+ * Constructions, canonicalised.
+ *
+ * The archive was read out of PowerPoint decks, so one construction appears
+ * under many spellings: "Hand Knotted", "Handknotted", "Han D Knotted" and
+ * "H And Knotted" are the same thing, as are "Handloom" and "Hand Loom".
+ * Measured over 8,000 records: 149 distinct values covering roughly eight real
+ * constructions. Stripping every non-letter before matching collapses them.
+ */
+const CONSTRUCTIONS: Record<string, string> = {
+  HANDKNOTTED: 'Hand Knotted',
+  HANDTUFTED: 'Hand Tufted',
+  HANDWOVEN: 'Hand Woven',
+  HANDLOOM: 'Handloom',
+  HANDLOOMTUFT: 'Handloom Tuft',
+  LOOMKNOTTED: 'Loom Knotted',
+  INDONEPALI: 'Indo Nepali',
+  NEPALI: 'Nepali',
+  PITLOOM: 'Pitloom',
+  BROADLOOM: 'Broadloom',
+  MACHINEMADE: 'Machine Made',
+  JAQUARD: 'Jacquard',
+  JACQUARD: 'Jacquard',
+};
+
+/** True only for values we recognise, so junk never becomes a filter chip. */
+export function canonicalConstruction(v: unknown): string {
+  const key = (v ?? '').toString().toUpperCase().replace(/[^A-Z]/g, '');
+  return CONSTRUCTIONS[key] || '';
+}
+
 function mapEm(id: string, d: any): ShowroomProduct {
   const photos: string[] = (d.photos || []).map((p: any) => p?.url).filter(Boolean);
   const style = d.styleDisplay || `EM-${d.styleKey || d.style || ''}`;
@@ -70,7 +102,7 @@ function mapEm(id: string, d: any): ShowroomProduct {
     // where category reads "Area Rug". Mapping it to construction was the
     // reason the portal showed "Not recorded" against data that exists on 43%
     // of the archive.
-    construction: tidy(d.category),
+    construction: canonicalConstruction(d.category) || tidy(d.category),
     category: '',
     size: tidy(d.size),
     gsm: tidy(d.gsm),

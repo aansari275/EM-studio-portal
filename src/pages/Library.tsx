@@ -14,6 +14,7 @@ import { generateProductPPT } from '../lib/pptGenerator';
 import { createCatalog, catalogUrl } from '../lib/catalogs';
 import { signOutUser, currentUserEmail } from '../lib/auth';
 import { thumb, heroImage, orderedImages } from '../lib/img';
+import { canonicalConstruction } from '../lib/library';
 import { NewProduct } from '../components/NewProduct';
 import { PhotoDrop } from '../components/PhotoDrop';
 
@@ -25,8 +26,14 @@ import { PhotoDrop } from '../components/PhotoDrop';
  * sometimes with spaces instead of dashes.
  */
 function styleYear(styleNumber: string): string {
-  const m = (styleNumber || '').toUpperCase().replace(/\s+/g, '-').match(/^EM-?(\d{2})-/);
-  return m ? `20${m[1]}` : '';
+  // Separators are inconsistent in the data: EM-21-CO-2227, EM 21 CO 2227 and
+  // EM.21.CO.2227 all occur. Normalise them all to dashes before matching.
+  const m = (styleNumber || '').toUpperCase().replace(/[\s._/]+/g, '-').match(/^EM-?(\d{2})-/);
+  if (!m) return '';
+  const y = Number(m[1]);
+  // Two typos survived into the archive as year 35 and 28. Anything beyond next
+  // year is a mistype, not a real season, so it is not offered as a filter.
+  return y > 26 ? '' : `20${m[1]}`;
 }
 
 export function Library() {
@@ -67,7 +74,9 @@ export function Library() {
   const builds = useMemo(() => {
     const c = new Map<string, number>();
     products.forEach((p) => {
-      const v = (p.construction || '').trim();
+      // Only recognised constructions become chips. The field also carries
+      // materials, GSM numbers and variant codes, which are not filters.
+      const v = canonicalConstruction(p.construction);
       if (v) c.set(v, (c.get(v) || 0) + 1);
     });
     return [...c.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([v]) => v);
@@ -78,7 +87,7 @@ export function Library() {
       products.filter(
         (p) =>
           (!year || styleYear(p.styleNumber) === year) &&
-          (!build || (p.construction || '') === build) &&
+          (!build || canonicalConstruction(p.construction) === build) &&
           (!needsPhotos || !heroImage(p))
       ),
     [products, year, build, needsPhotos]
@@ -284,7 +293,9 @@ function Card({
         <button onClick={onOpen} className="block text-left text-sm font-semibold leading-tight hover:underline">
           {product.displayName}
         </button>
-        <div className="font-mono text-[10.5px] text-neutral-400">{product.styleNumber}</div>
+        {product.styleNumber && product.styleNumber !== product.displayName && (
+          <div className="font-mono text-[10.5px] text-neutral-400">{product.styleNumber}</div>
+        )}
         {(product.construction || product.materials || product.color || product.size) && (
           <div className="mt-1 text-[11.5px] leading-snug text-neutral-500">
             {[product.construction, product.materials].filter(Boolean).join(' · ')}
