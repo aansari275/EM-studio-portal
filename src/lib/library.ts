@@ -35,6 +35,24 @@ function serialOf(s: string): string {
   return bits.length ? bits[bits.length - 1] : '';
 }
 
+
+/**
+ * The archive was typed by hand over years: "WOOL", "Wool" and "W OOL" are the
+ * same thing, as are "Hand Woven" and "HAND WOVEN". Collapse the noise so a
+ * value displays consistently and a filter can match it.
+ */
+function tidy(v: unknown): string {
+  let t = (v ?? '').toString().replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  t = t.replace(/\s*Production Technique\s*:?\s*$/i, '').trim();
+  // "W OOL" -> "WOOL": a stray space inside a single word
+  t = t.replace(/\b([A-Z])\s([A-Z]{2,})\b/g, '$1$2');
+  if (t === t.toUpperCase() || t === t.toLowerCase()) {
+    t = t.toLowerCase().replace(/\b[a-z]/g, (m) => m.toUpperCase());
+  }
+  return t;
+}
+
 function mapEm(id: string, d: any): ShowroomProduct {
   const photos: string[] = (d.photos || []).map((p: any) => p?.url).filter(Boolean);
   const style = d.styleDisplay || `EM-${d.styleKey || d.style || ''}`;
@@ -45,12 +63,17 @@ function mapEm(id: string, d: any): ShowroomProduct {
     displayName: d.color ? `${style} · ${d.color}` : style,
     firebaseUrl: photos[0] || '',
     additionalImages: photos.slice(1),
-    color: d.color || '',
-    materials: d.material || '',
-    construction: '',
-    category: d.category || '',
-    size: d.size || '',
-    gsm: d.gsm || '',
+    color: tidy(d.color),
+    materials: tidy(d.material),
+    // em_products.category actually holds the CONSTRUCTION — "Hand Woven",
+    // "Hand Knotted", "Handloom". It is not a category in the showroom sense,
+    // where category reads "Area Rug". Mapping it to construction was the
+    // reason the portal showed "Not recorded" against data that exists on 43%
+    // of the archive.
+    construction: tidy(d.category),
+    category: '',
+    size: tidy(d.size),
+    gsm: tidy(d.gsm),
     source: 'ppt_archive',
     tags: [],
   };

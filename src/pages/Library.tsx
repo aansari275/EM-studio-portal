@@ -31,6 +31,7 @@ export function Library() {
   const [term, setTerm] = useState('');
   const [debounced, setDebounced] = useState('');
   const [year, setYear] = useState('');
+  const [build, setBuild] = useState('');
   const [needsPhotos, setNeedsPhotos] = useState(false);
   const [open, setOpen] = useState<ShowroomProduct | null>(null);
   const tray = useSelection();
@@ -48,19 +49,35 @@ export function Library() {
     queryFn: () => (debounced ? searchLibrary(debounced, 300) : getLibraryProducts(200)),
   });
 
-  // Only offer years that are actually present in what loaded.
+  // Chips are built from what actually loaded, never hardcoded. The first
+  // version listed Hand Knotted / Silk / Wool from the TypeScript interface and
+  // matched nothing, because showroom_products has those fields empty. The
+  // em_products archive does carry them, so they are real again — but only the
+  // values genuinely present are offered.
   const years = useMemo(() => {
     const seen = new Set<string>();
     products.forEach((p) => { const y = styleYear(p.styleNumber); if (y) seen.add(y); });
     return [...seen].sort().reverse();
   }, [products]);
 
+  const builds = useMemo(() => {
+    const c = new Map<string, number>();
+    products.forEach((p) => {
+      const v = (p.construction || '').trim();
+      if (v) c.set(v, (c.get(v) || 0) + 1);
+    });
+    return [...c.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([v]) => v);
+  }, [products]);
+
   const shown = useMemo(
     () =>
       products.filter(
-        (p) => (!year || styleYear(p.styleNumber) === year) && (!needsPhotos || !p.firebaseUrl)
+        (p) =>
+          (!year || styleYear(p.styleNumber) === year) &&
+          (!build || (p.construction || '') === build) &&
+          (!needsPhotos || !heroImage(p))
       ),
-    [products, year, needsPhotos]
+    [products, year, build, needsPhotos]
   );
 
   const allShownSelected = shown.length > 0 && shown.every((p) => tray.has(p.id));
@@ -98,15 +115,24 @@ export function Library() {
         </label>
 
         <div className="flex flex-wrap items-center gap-5 pt-5">
-          <Chip on={!year && !needsPhotos} onClick={() => { setYear(''); setNeedsPhotos(false); }}>
+          <Chip on={!year && !build && !needsPhotos}
+            onClick={() => { setYear(''); setBuild(''); setNeedsPhotos(false); }}>
             All
           </Chip>
+          {builds.map((b) => (
+            <Chip key={b} on={build === b}
+              onClick={() => { setBuild(build === b ? '' : b); setNeedsPhotos(false); }}>
+              {b}
+            </Chip>
+          ))}
           {years.map((y) => (
-            <Chip key={y} on={year === y} onClick={() => { setYear(year === y ? '' : y); setNeedsPhotos(false); }}>
+            <Chip key={y} on={year === y}
+              onClick={() => { setYear(year === y ? '' : y); setNeedsPhotos(false); }}>
               {y}
             </Chip>
           ))}
-          <Chip on={needsPhotos} onClick={() => { setNeedsPhotos(!needsPhotos); setYear(''); }}>
+          <Chip on={needsPhotos}
+            onClick={() => { setNeedsPhotos(!needsPhotos); setYear(''); setBuild(''); }}>
             Needs photos
           </Chip>
 
@@ -237,6 +263,13 @@ function Card({
           {product.displayName}
         </button>
         <div className="font-mono text-[10.5px] text-neutral-400">{product.styleNumber}</div>
+        {(product.construction || product.materials || product.color || product.size) && (
+          <div className="mt-1 text-[11.5px] leading-snug text-neutral-500">
+            {[product.construction, product.materials].filter(Boolean).join(' · ')}
+            {(product.construction || product.materials) && (product.color || product.size) ? <br /> : null}
+            {[product.color, product.size].filter(Boolean).join(' · ')}
+          </div>
+        )}
         <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-500">
           <i className={'h-[5px] w-[5px] shrink-0 rounded-full ' + (hasPhoto ? 'bg-[#4C7459]' : 'bg-[#98671A]')} />
           {hasPhoto ? 'Photo ready' : 'Needs photo'}
