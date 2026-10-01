@@ -1429,3 +1429,132 @@ export async function getDesignVariants(baseStyleNumber: string): Promise<Showro
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Creating products and adding photos from the studio.
+//
+// Until now nothing could write a product: the only setDoc against
+// showroom_products lived inside migrateHeimtextilToShowroom, a one-off. And
+// uploadDesignPhoto wrote to empl_designs, a collection the library never
+// reads and which still holds zero documents. So a photo taken in the studio
+// had no way of reaching the library, a PPT or a buyer link.
+//
+// Storage follows the convention the migration already set:
+//   products/<STYLE-NUMBER>/main.jpg      the full-rug shot
+//   products/<STYLE-NUMBER>/image-2.jpg   everything after
+// The first photo is named main so heroImage() picks it as the hero.
+
+/** Doc id and storage folder: EM 24 MA 7818 and em-24-ma-7818 collapse to one. */
+export function styleSlug(styleNumber: string): string {
+  return (styleNumber || '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/** EM-23-MA-6727-GREY -> EM-23-MA-6727. Matches mapShowroomDoc's own rule. */
+export function deriveBaseStyle(styleNumber: string): string {
+  const parts = styleSlug(styleNumber).split('-');
+  return parts.length >= 4 ? parts.slice(0, 4).join('-') : styleSlug(styleNumber);
+}
+
+export interface NewProductInput {
+  styleNumber: string;
+  displayName?: string;
+  construction?: string;
+  materials?: string;
+  color?: string;
+  size?: string;
+  gsm?: string;
+}
+
+export async function findProductByStyle(styleNumber: string): Promise<ShowroomProduct | null> {
+  const slug = styleSlug(styleNumber);
+  if (!slug) return null;
+  const direct = await getDoc(doc(db, SHOWROOM_COLLECTION, slug));
+  if (direct.exists()) return mapShowroomDoc(direct);
+  const snap = await getDocs(
+    query(collection(db, SHOWROOM_COLLECTION), where('styleNumber', '==', styleNumber.trim()), limit(1))
+  );
+  return snap.empty ? null : mapShowroomDoc(snap.docs[0]);
+}
+
+export async function createShowroomProduct(input: NewProductInput): Promise<ShowroomProduct> {
+  const styleNumber = (input.styleNumber || '').trim();
+  if (!styleNumber) throw new Error('A style number is required.');
+  const slug = styleSlug(styleNumber);
+
+  const clash = await findProductByStyle(styleNumber);
+  if (clash) throw new Error(`${styleNumber} already exists. Open it and add photos there instead.`);
+
+  const payload: Record<string, unknown> = {
+    styleNumber,
+    baseStyleNumber: deriveBaseStyle(styleNumber),
+    displayName: (input.displayName || styleNumber).trim(),
+    firebaseUrl: '',
+    additionalImages: [],
+    category: 'Area Rug',
+    source: 'studio-portal',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  // Firestore rejects undefined, so only write fields that were filled in.
+  for (const k of ['construction', 'materials', 'color', 'size', 'gsm'] as const) {
+    const v = (input[k] || '').trim();
+    if (v) payload[k] = v;
+  }
+
+  await setDoc(doc(db, SHOWROOM_COLLECTION, slug), payload);
+  const created = await getDoc(doc(db, SHOWROOM_COLLECTION, slug));
+  return mapShowroomDoc(created);
+}
+
+/**
+ * Upload photos onto an existing product. Returns the updated product.
+ * The first photo on a product with none becomes main.<ext>, so it is the hero.
+ */
+export async function addProductPhotos(
+  product: ShowroomProduct,
+  files: File[],
+  onProgress?: (done: number, total: number) => void
+): Promise<ShowroomProduct> {
+  if (!files.length) return product;
+  const slug = styleSlug(product.styleNumber || product.baseStyleNumber);
+  if (!slug) throw new Error('This product has no style number, so there is nowhere to file the photos.');
+
+  const docRef = doc(db, SHOWROOM_COLLECTION, slug);
+  const existing = await getDoc(docRef);
+  if (!existing.exists()) {
+    throw new Error(
+      `No document at showroom_products/${slug}. This product came from an older import with a ` +
+      `different id, so photos cannot be attached to it yet.`
+    );
+  }
+
+  const data = existing.data() as Record<string, unknown>;
+  let hero = (data.firebaseUrl as string) || '';
+  const extras = [...((data.additionalImages as string[]) || [])];
+  let seq = extras.length + (hero ? 1 : 0) + 1;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    // Originals run 3500-4000px and up to 11 MB. Nothing downstream needs more
+    // than ~2000px, and the buyer link is resized again by the image CDN.
+    let body: Blob = file;
+    try {
+      const imageCompression = (await import('browser-image-compression')).default;
+      body = await imageCompression(file, { maxWidthOrHeight: 2000, maxSizeMB: 2, useWebWorker: true });
+    } catch {
+      /* compression is a nicety; upload the original rather than fail */
+    }
+    const name = !hero && i === 0 ? `main.${ext}` : `image-${seq++}.${ext}`;
+    const sref = ref(storage, `products/${slug}/${name}`);
+    await uploadBytes(sref, body, { contentType: file.type || 'image/jpeg' });
+    const url = await getDownloadURL(sref);
+    if (!hero && i === 0) hero = url;
+    else extras.push(url);
+    onProgress?.(i + 1, files.length);
+  }
+
+  await updateDoc(docRef, { firebaseUrl: hero, additionalImages: extras, updatedAt: serverTimestamp() });
+  const fresh = await getDoc(docRef);
+  return mapShowroomDoc(fresh);
+}

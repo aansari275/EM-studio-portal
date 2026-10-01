@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Search, Check, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, Check, X, Plus } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import {
   getLibraryProducts,
@@ -14,6 +14,8 @@ import { generateProductPPT } from '../lib/pptGenerator';
 import { createCatalog, catalogUrl } from '../lib/catalogs';
 import { signOutUser, currentUserEmail } from '../lib/auth';
 import { thumb, heroImage, orderedImages } from '../lib/img';
+import { NewProduct } from '../components/NewProduct';
+import { PhotoDrop } from '../components/PhotoDrop';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -34,8 +36,10 @@ export function Library() {
   const [build, setBuild] = useState('');
   const [needsPhotos, setNeedsPhotos] = useState(false);
   const [open, setOpen] = useState<ShowroomProduct | null>(null);
+  const [creating, setCreating] = useState(false);
   const tray = useSelection();
   const navigate = useNavigate();
+  const qc = useQueryClient();
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(term.trim()), 300);
@@ -115,6 +119,12 @@ export function Library() {
         </label>
 
         <div className="flex flex-wrap items-center gap-5 pt-5">
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-1.5 rounded-sm bg-[#2F4C69] px-3 py-1.5 text-[12.5px] font-semibold text-white"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={3} /> New design
+          </button>
           <Chip on={!year && !build && !needsPhotos}
             onClick={() => { setYear(''); setBuild(''); setNeedsPhotos(false); }}>
             All
@@ -173,7 +183,19 @@ export function Library() {
       </div>
 
       <Tray onDone={(id) => navigate(`/links?new=${id}`)} />
-      {open && <Detail product={open} onClose={() => setOpen(null)} />}
+      {open && (
+        <Detail
+          product={open}
+          onClose={() => setOpen(null)}
+          onChanged={(p) => { setOpen(p); qc.invalidateQueries({ queryKey: ['library'] }); }}
+        />
+      )}
+      {creating && (
+        <NewProduct
+          onClose={() => setCreating(false)}
+          onCreated={(p) => { setCreating(false); qc.invalidateQueries({ queryKey: ['library'] }); setOpen(p); }}
+        />
+      )}
     </div>
   );
 }
@@ -279,7 +301,9 @@ function Card({
   );
 }
 
-function Detail({ product, onClose }: { product: ShowroomProduct; onClose: () => void }) {
+function Detail({ product, onClose, onChanged }: {
+  product: ShowroomProduct; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
+}) {
   const tray = useSelection();
   const selected = tray.has(product.id);
   const [shot, setShot] = useState(heroImage(product));
@@ -385,7 +409,11 @@ function Detail({ product, onClose }: { product: ShowroomProduct; onClose: () =>
               </div>
             )}
 
-            <div className="mt-6 flex flex-wrap gap-3">
+            <div className="mt-6">
+              <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
               <button
                 onClick={() => tray.toggle(product)}
                 className={
@@ -397,12 +425,7 @@ function Detail({ product, onClose }: { product: ShowroomProduct; onClose: () =>
               >
                 {selected ? 'Remove from selection' : 'Add to selection'}
               </button>
-              <Link
-                to={`/rug-gallery/${encodeURIComponent(product.baseStyleNumber)}`}
-                className="rounded-sm border border-neutral-200 px-[18px] py-2.5 text-[13px] font-semibold hover:border-neutral-400"
-              >
-                Upload photos
-              </Link>
+
             </div>
           </div>
         </div>
