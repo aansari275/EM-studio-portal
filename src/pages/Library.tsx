@@ -355,22 +355,27 @@ function Detail({ product, onClose, onChanged }: {
                 <div className="flex h-full items-center justify-center text-sm text-neutral-400">No photo yet</div>
               )}
             </div>
-            {gallery.length > 1 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {gallery.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => setShot(g)}
-                    className={
-                      'h-14 w-14 overflow-hidden rounded-sm ' +
-                      (g === shot ? 'shadow-[0_0_0_2px_#2F4C69]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]')
-                    }
-                  >
-                    <img src={thumb(g, 120)} alt="" className="h-full w-full object-cover" />
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {gallery.map((g, i) => (
+                <button
+                  key={g}
+                  onClick={() => setShot(g)}
+                  title={i === 0 ? 'Main photo' : `Photo ${i + 1}`}
+                  className={
+                    'relative h-14 w-14 shrink-0 overflow-hidden rounded-sm ' +
+                    (g === shot ? 'shadow-[0_0_0_2px_#2F4C69]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]')
+                  }
+                >
+                  <img src={thumb(g, 120)} alt="" className="h-full w-full object-cover" />
+                  {i === 0 && (
+                    <span className="absolute inset-x-0 bottom-0 bg-black/55 text-center text-[8px] font-semibold uppercase tracking-wide text-white">
+                      Main
+                    </span>
+                  )}
+                </button>
+              ))}
+              <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
+            </div>
           </div>
 
           <div>
@@ -408,10 +413,6 @@ function Detail({ product, onClose, onChanged }: {
                 </div>
               </div>
             )}
-
-            <div className="mt-6">
-              <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
-            </div>
 
             <div className="mt-5 flex flex-wrap gap-3">
               <button
