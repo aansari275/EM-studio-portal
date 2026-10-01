@@ -20,7 +20,7 @@ export function NewProduct({
   const [f, setF] = useState({
     styleNumber: '', displayName: '', construction: '', materials: '', color: '', size: '', gsm: '',
   });
-  const [photos, setPhotos] = useState<File[]>([]);
+  const [slots, setSlots] = useState<{ file: File; original?: File }[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
 
@@ -41,6 +41,7 @@ export function NewProduct({
       let created = await createShowroomProduct(f);
       // Photos are uploaded only once the design exists, so a cancelled entry
       // never leaves orphan files behind in storage.
+      const photos = slots.map((s) => s.file);
       if (photos.length) {
         created = await addProductPhotos(created, photos, (done, total) =>
           setBusy(done === total ? 'Finishing…' : `Uploading ${done + 1} of ${total}…`)
@@ -86,7 +87,7 @@ export function NewProduct({
               Photos
             </span>
             <div className="mt-2">
-              <PhotoPicker files={photos} onChange={setPhotos} disabled={!!busy} />
+              <PhotoPicker slots={slots} onChange={setSlots} disabled={!!busy} />
             </div>
           </div>
 
@@ -95,8 +96,8 @@ export function NewProduct({
 
         <div className="flex items-center gap-3 border-t border-neutral-100 px-6 py-4">
           <p className="flex-1 text-[12.5px] text-neutral-400">
-            {photos.length
-              ? `${photos.length} photo${photos.length > 1 ? 's' : ''} ready. The first is the main one.`
+            {slots.length
+              ? `${slots.length} photo${slots.length > 1 ? 's' : ''} ready. The first is the main one.`
               : 'Photos are optional, you can add them later.'}
           </p>
           <button onClick={onClose} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
