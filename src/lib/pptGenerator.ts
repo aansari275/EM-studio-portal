@@ -91,6 +91,25 @@ export async function generateProductPPT(
  * Intro Slide 1: NEW Logo + Banner with certifications
  * Uses the new Eastern logo (transparent background)
  */
+
+/**
+ * The EM mark, top right, in the same slot the house deck uses on its product
+ * slides. Fitted to the slot width and centred in its height, because the
+ * current logo is 2.666 wide to 1 and the slot was cut for the old stacked
+ * mark at 1.26.
+ */
+function addCornerLogo(slide: pptxgen.Slide) {
+  const w = 1.674;
+  const h = w / ICON_AR;
+  slide.addImage({
+    path: `${ASSETS_BASE}/em-logo-icon.png`,
+    x: 11.449,
+    y: (1.323 - h) / 2,
+    w,
+    h,
+  });
+}
+
 function addIntroSlide1(pptx: pptxgen) {
   const slide = pptx.addSlide();
 
@@ -106,13 +125,13 @@ function addIntroSlide1(pptx: pptxgen) {
   // NEW Logo image (transparent background)
   slide.addImage({
     path: `${ASSETS_BASE}/em-logo-new.png`,
-    // 2498x963 = 2.594 aspect. The old box was 1.2 x 0.96 (1.25) which stretched
-    // it to roughly twice its height. Height is derived, and y centres it in the
-    // white panel behind.
-    x: 0.62,
-    y: 0.59 + (0.96 - 1.2 / LOGO_AR) / 2,
-    w: 1.2,
-    h: 1.2 / LOGO_AR,
+    // House deck slot, scaled: x 1.18 y 1.30, 1.88 x 1.49. The current logo is
+    // 2.594 wide to 1, so it is fitted to the slot width and centred in its
+    // height instead of being squashed into the old mark's proportions.
+    x: 0.619,
+    y: 0.682 + (0.782 - 0.987 / LOGO_AR) / 2,
+    w: 0.987,
+    h: 0.987 / LOGO_AR,
   });
 
   // "Eastern Mills" text next to logo
@@ -150,6 +169,7 @@ function addIntroSlide1(pptx: pptxgen) {
  */
 function addIntroSlide2(pptx: pptxgen) {
   const slide = pptx.addSlide();
+  addCornerLogo(slide);
 
   // Factory aerial image
   slide.addImage({
@@ -183,138 +203,70 @@ function addIntroSlide2(pptx: pptxgen) {
 function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   const slide = pptx.addSlide();
 
+  // Geometry lifted straight from the house deck, "New Collection offer for
+  // Zara.pptx". That file is 25.4 x 14.29in, exactly 1.905x this canvas, so
+  // every value here is the original multiplied by 13.333/25.4. Its 22.86pt
+  // body text lands on exactly 12pt, which is what confirms the deck is a
+  // scaled version of a 13.333in design rather than something hand-drawn.
+  //
+  // Do not "improve" these numbers. The sizes of the primary, second, third
+  // and fourth images, the text position and the font size are the house
+  // standard and are deliberately unchanged.
+
   // Hero first. firebaseUrl is a numbered detail frame on ~68% of products, so
-  // using it as images[0] put a corner close-up in the big slot and left the
-  // full-rug shot as a small thumbnail. orderedImages corrects the order.
+  // using it as images[0] put a corner close-up in the big slot.
   const images: string[] = orderedImages(product);
 
-  // === TOP RIGHT: Logo ICON (not full logo) ===
-  slide.addShape('rect', {
-    x: 11.23,
-    y: 0,
-    w: 1.91,
-    h: 1.21,
-    fill: { color: COLORS.white },
-  });
+  // === TOP RIGHT: EM logo, on every slide ===
+  // The slot in the house deck is 1.674 x 1.323 (the old stacked mark). The
+  // current logo is far wider, so it is fitted to the slot's width and centred
+  // in its height rather than squashed into the old proportions.
+  addCornerLogo(slide);
 
-  // Logo Icon on product slides
-  slide.addImage({
-    path: `${ASSETS_BASE}/em-logo-icon.png`,
-    // 6300x2363 = 2.666 aspect. A 1.0 x 1.0 box squashed it to 2.7x too tall.
-    x: 11.23 + (1.91 - 1.34) / 2,
-    y: (1.21 - 1.34 / ICON_AR) / 2,
-    w: 1.34,
-    h: 1.34 / ICON_AR,
-  });
-
-  // === LEFT SIDE: Main product image (full height) ===
-  const mainImage = images[0];
-  if (mainImage) {
-    slide.addImage({
-      path: mainImage,
-      x: 0.22,
-      y: 0.5,
-      w: 3.97,
-      h: 5.83,
-      sizing: { type: 'contain', w: 3.97, h: 5.83 },
-    });
+  // === PRIMARY: tall portrait down the left ===
+  if (images[0]) {
+    slide.addImage({ path: images[0], x: 0.121, y: 0.273, w: 5.086, h: 7.118,
+      sizing: { type: 'contain', w: 5.086, h: 7.118 } });
   } else {
-    // Placeholder if no image
-    slide.addShape('rect', {
-      x: 0.22,
-      y: 0.5,
-      w: 3.97,
-      h: 5.83,
-      fill: { color: 'F5F5F5' },
-    });
-    slide.addText('No Image', {
-      x: 0.22,
-      y: 3.2,
-      w: 3.97,
-      h: 0.5,
-      fontSize: 16,
-      fontFace: FONTS.main,
-      color: COLORS.gray,
-      align: 'center',
-    });
+    slide.addShape('rect', { x: 0.121, y: 0.273, w: 5.086, h: 7.118, fill: { color: 'F5F5F5' } });
+    slide.addText('No Image', { x: 0.121, y: 3.5, w: 5.086, h: 0.5, fontSize: 16,
+      fontFace: FONTS.main, color: COLORS.gray, align: 'center' });
   }
 
-  // === RIGHT SIDE: Product details TABLE ===
-  // Most of showroom_products is empty: construction, materials, gsm and size
-  // are unset on essentially every record, so the old table printed two rows and
-  // stopped. Everything derivable from the style number is added here, and blank
-  // fields are simply skipped rather than printed as empty.
-  const rows: Array<[string, string]> = [];
-  const push = (k: string, v?: string | null) => {
-    const t = (v ?? '').toString().trim();
-    if (t) rows.push([k, t]);
-  };
-
-  const style = (product.styleNumber || '').trim();
-  const base = (product.baseStyleNumber || '').trim();
-  const name = (product.displayName || base || '').trim();
-
-  push('Product ID', name);
-  if (style && style.toUpperCase() !== name.toUpperCase()) push('Style No', style);
-  if (base && base.toUpperCase() !== name.toUpperCase() && base.toUpperCase() !== style.toUpperCase())
-    push('Design', base);
-  push('Colour', product.color?.toUpperCase());
-  push('Size', product.size);
-  push('GSM', product.gsm);
-  push('Material', product.materials?.toUpperCase());
-  push('Construction', product.construction?.toUpperCase());
-  push('Category', product.category?.toUpperCase());
-
-  // EM-23-MA-6255 -> 2023. Sometimes spaced instead of dashed.
-  const yr = style.toUpperCase().replace(/\s+/g, '-').match(/^EM-?(\d{2})-/);
-  if (yr) push('Introduced', `20${yr[1]}`);
-
-  const shots = images.length;
-  if (shots) push('Photographs', `${shots}`);
-
-  const tableRows: pptxgen.TableRow[] = rows.map(([k, v], i) => [
-    { text: k, options: { bold: i === 0, fontSize: i === 0 ? 13 : 12, fontFace: FONTS.main, color: COLORS.gray } },
-    { text: ':', options: { bold: i === 0, fontSize: i === 0 ? 13 : 12, fontFace: FONTS.main, color: COLORS.gray } },
-    { text: v, options: { bold: i === 0, fontSize: i === 0 ? 13 : 12, fontFace: FONTS.main, color: COLORS.gray } },
-  ]);
-
-  // Add table
-  slide.addTable(tableRows, {
-    x: 4.85,
-    y: 0.95,
-    w: 8.34,
-    colW: [1.9, 0.17, 6.27],
-    fontFace: FONTS.main,
-    fontSize: 12,
-    color: COLORS.gray,
-    fill: { color: COLORS.white },
-    border: { type: 'none' },
-    margin: [0.05, 0.05, 0.05, 0.05],
-    valign: 'middle',
+  // === SECOND, THIRD, FOURTH ===
+  const rest: Array<{ x: number; y: number; w: number; h: number }> = [
+    { x: 5.149, y: 0.446, w: 4.861, h: 3.255 },
+    { x: 5.134, y: 3.921, w: 2.346, h: 3.396 },
+    { x: 8.362, y: 4.016, w: 4.766, h: 3.039 },
+  ];
+  rest.forEach((box, i) => {
+    const src = images[i + 1];
+    if (src) slide.addImage({ path: src, ...box, sizing: { type: 'contain', w: box.w, h: box.h } });
   });
 
-  // === THUMBNAILS ===
-  // Previously one 1.5x2.1 portrait plus a row of 1.74 squares starting at the
-  // same x, which overlapped the details table and left the extra shots tiny.
-  // Now a single row of four, sized to fill the full width right of the hero.
-  const thumbnails = images.slice(1, 5);
-  if (thumbnails.length) {
-    const gap = 0.18;
-    const rowX = 4.85;
-    const rowW = 13.19 - rowX;
-    const size = Math.min(2.4, (rowW - gap * (thumbnails.length - 1)) / thumbnails.length);
-    let x = rowX;
-    for (const src of thumbnails) {
-      slide.addImage({
-        path: src,
-        x,
-        y: 6.95 - size,
-        w: size,
-        h: size,
-        sizing: { type: 'contain', w: size, h: size },
-      });
-      x += size + gap;
-    }
+  // === RIGHT: the spec block ===
+  // Same four labels and the same dash style as the house deck.
+  const style = (product.styleNumber || product.baseStyleNumber || '').trim();
+  const lines: string[] = [];
+  if (style) lines.push(`STYLE NO. – ${style}`);
+  if (product.color) lines.push(`COLOR – ${product.color.toUpperCase()}`);
+  if (product.materials) lines.push(`MATERIAL – ${product.materials.toUpperCase()}`);
+  if (product.construction) lines.push(`${product.construction.toUpperCase()}`);
+  if (product.size) lines.push(`Size- ${product.size}`);
+  if (product.gsm) lines.push(`GSM- ${product.gsm}`);
+
+  if (lines.length) {
+    slide.addText(lines.join('\n'), {
+      x: 10.593,
+      y: 1.223,
+      w: 2.74,
+      h: 1.533,
+      fontSize: 12,
+      fontFace: FONTS.main,
+      color: COLORS.gray,
+      valign: 'top',
+      lineSpacingMultiple: 1.2,
+    });
   }
 }
 
@@ -324,6 +276,7 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
  */
 function addOutroSlide1(pptx: pptxgen) {
   const slide = pptx.addSlide();
+  addCornerLogo(slide);
 
   // Gray box (top left) with text
   slide.addShape('rect', {
