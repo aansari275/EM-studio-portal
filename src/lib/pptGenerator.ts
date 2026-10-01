@@ -20,6 +20,12 @@ const FONTS = {
   dotum: 'Dotum',
 };
 
+// Real pixel aspect ratios of the logo files. pptxgenjs does not reliably honour
+// sizing:'contain', so every logo box derives its height from these instead of
+// hardcoding one that happens to be wrong.
+const LOGO_AR = 2498 / 963;   // em-logo-new.png
+const ICON_AR = 6300 / 2363;  // em-logo-icon.png
+
 // PPT Assets base. Same-origin in the browser; the server-side generator
 // points this at a local directory, because pptxgenjs under Node reads image
 // paths off the filesystem rather than fetching them.
@@ -100,11 +106,13 @@ function addIntroSlide1(pptx: pptxgen) {
   // NEW Logo image (transparent background)
   slide.addImage({
     path: `${ASSETS_BASE}/em-logo-new.png`,
+    // 2498x963 = 2.594 aspect. The old box was 1.2 x 0.96 (1.25) which stretched
+    // it to roughly twice its height. Height is derived, and y centres it in the
+    // white panel behind.
     x: 0.62,
-    y: 0.59,
+    y: 0.59 + (0.96 - 1.2 / LOGO_AR) / 2,
     w: 1.2,
-    h: 0.96,
-    sizing: { type: 'contain', w: 1.2, h: 0.96 },
+    h: 1.2 / LOGO_AR,
   });
 
   // "Eastern Mills" text next to logo
@@ -192,11 +200,11 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   // Logo Icon on product slides
   slide.addImage({
     path: `${ASSETS_BASE}/em-logo-icon.png`,
-    x: 11.5,
-    y: 0.1,
-    w: 1.0,
-    h: 1.0,
-    sizing: { type: 'contain', w: 1.0, h: 1.0 },
+    // 6300x2363 = 2.666 aspect. A 1.0 x 1.0 box squashed it to 2.7x too tall.
+    x: 11.23 + (1.91 - 1.34) / 2,
+    y: (1.21 - 1.34 / ICON_AR) / 2,
+    w: 1.34,
+    h: 1.34 / ICON_AR,
   });
 
   // === LEFT SIDE: Main product image (full height) ===
@@ -232,66 +240,50 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   }
 
   // === RIGHT SIDE: Product details TABLE ===
-  const tableRows: pptxgen.TableRow[] = [];
+  // Most of showroom_products is empty: construction, materials, gsm and size
+  // are unset on essentially every record, so the old table printed two rows and
+  // stopped. Everything derivable from the style number is added here, and blank
+  // fields are simply skipped rather than printed as empty.
+  const rows: Array<[string, string]> = [];
+  const push = (k: string, v?: string | null) => {
+    const t = (v ?? '').toString().trim();
+    if (t) rows.push([k, t]);
+  };
 
-  // Product ID row (bold)
-  tableRows.push([
-    { text: 'Product ID', options: { bold: true, fontSize: 13, fontFace: FONTS.main, color: COLORS.gray } },
-    { text: ':', options: { bold: true, fontSize: 13, fontFace: FONTS.main, color: COLORS.gray } },
-    { text: product.displayName || product.baseStyleNumber || 'N/A', options: { bold: true, fontSize: 13, fontFace: FONTS.main, color: COLORS.gray } },
+  const style = (product.styleNumber || '').trim();
+  const base = (product.baseStyleNumber || '').trim();
+  const name = (product.displayName || base || '').trim();
+
+  push('Product ID', name);
+  if (style && style.toUpperCase() !== name.toUpperCase()) push('Style No', style);
+  if (base && base.toUpperCase() !== name.toUpperCase() && base.toUpperCase() !== style.toUpperCase())
+    push('Design', base);
+  push('Colour', product.color?.toUpperCase());
+  push('Size', product.size);
+  push('GSM', product.gsm);
+  push('Material', product.materials?.toUpperCase());
+  push('Construction', product.construction?.toUpperCase());
+  push('Category', product.category?.toUpperCase());
+
+  // EM-23-MA-6255 -> 2023. Sometimes spaced instead of dashed.
+  const yr = style.toUpperCase().replace(/\s+/g, '-').match(/^EM-?(\d{2})-/);
+  if (yr) push('Introduced', `20${yr[1]}`);
+
+  const shots = images.length;
+  if (shots) push('Photographs', `${shots}`);
+
+  const tableRows: pptxgen.TableRow[] = rows.map(([k, v], i) => [
+    { text: k, options: { bold: i === 0, fontSize: i === 0 ? 13 : 12, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: ':', options: { bold: i === 0, fontSize: i === 0 ? 13 : 12, fontFace: FONTS.main, color: COLORS.gray } },
+    { text: v, options: { bold: i === 0, fontSize: i === 0 ? 13 : 12, fontFace: FONTS.main, color: COLORS.gray } },
   ]);
-
-  // Color
-  if (product.color) {
-    tableRows.push([
-      { text: 'Color', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.color.toUpperCase(), options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-    ]);
-  }
-
-  // Size
-  if (product.size) {
-    tableRows.push([
-      { text: 'Size', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.size, options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-    ]);
-  }
-
-  // GSM
-  if (product.gsm) {
-    tableRows.push([
-      { text: 'GSM', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.gsm, options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-    ]);
-  }
-
-  // Material
-  if (product.materials) {
-    tableRows.push([
-      { text: 'Material', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: product.materials.toUpperCase(), options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-    ]);
-  }
-
-  // Construction / Category
-  if (product.construction || product.category) {
-    tableRows.push([
-      { text: 'Category', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: ':', options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-      { text: (product.construction || product.category || '').toUpperCase(), options: { fontSize: 12, fontFace: FONTS.main, color: COLORS.gray } },
-    ]);
-  }
 
   // Add table
   slide.addTable(tableRows, {
-    x: 8.51,
-    y: 1.21,
-    w: 4.82,
-    colW: [1.71, 0.17, 2.94],
+    x: 4.85,
+    y: 0.95,
+    w: 8.34,
+    colW: [1.9, 0.17, 6.27],
     fontFace: FONTS.main,
     fontSize: 12,
     color: COLORS.gray,
@@ -301,38 +293,27 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
     valign: 'middle',
   });
 
-  // === THUMBNAILS: Additional images ===
+  // === THUMBNAILS ===
+  // Previously one 1.5x2.1 portrait plus a row of 1.74 squares starting at the
+  // same x, which overlapped the details table and left the extra shots tiny.
+  // Now a single row of four, sized to fill the full width right of the hero.
   const thumbnails = images.slice(1, 5);
-
-  if (thumbnails.length > 0) {
-    // Portrait detail image (next to main image)
-    if (images.length > 1) {
+  if (thumbnails.length) {
+    const gap = 0.18;
+    const rowX = 4.85;
+    const rowW = 13.19 - rowX;
+    const size = Math.min(2.4, (rowW - gap * (thumbnails.length - 1)) / thumbnails.length);
+    let x = rowX;
+    for (const src of thumbnails) {
       slide.addImage({
-        path: images[1],
-        x: 4.74,
-        y: 2.63,
-        w: 1.5,
-        h: 2.1,
-        sizing: { type: 'contain', w: 1.5, h: 2.1 },
+        path: src,
+        x,
+        y: 6.95 - size,
+        w: size,
+        h: size,
+        sizing: { type: 'contain', w: size, h: size },
       });
-    }
-
-    // Row of square thumbnails at bottom
-    const thumbSize = 1.74;
-    const thumbY = 5.06;
-    const thumbGap = 0.19;
-    let thumbX = 4.74;
-
-    for (let i = 0; i < Math.min(thumbnails.length, 4); i++) {
-      slide.addImage({
-        path: thumbnails[i],
-        x: thumbX,
-        y: thumbY,
-        w: thumbSize,
-        h: thumbSize,
-        sizing: { type: 'contain', w: thumbSize, h: thumbSize },
-      });
-      thumbX += thumbSize + thumbGap;
+      x += size + gap;
     }
   }
 }
@@ -465,12 +446,11 @@ function addOutroSlide2(pptx: pptxgen) {
 
   // Bottom right - logo horizontal
   slide.addImage({
-    path: `${ASSETS_BASE}/em-logo-horizontal.png`,
+    path: `${ASSETS_BASE}/em-logo-new.png`,
     x: 10.02,
-    y: 5.29,
+    y: 5.29 + (1.79 - 2.34 / LOGO_AR) / 2,
     w: 2.34,
-    h: 1.79,
-    sizing: { type: 'contain', w: 2.34, h: 1.79 },
+    h: 2.34 / LOGO_AR,
   });
 }
 
@@ -635,11 +615,10 @@ function addOutroSlide3(pptx: pptxgen) {
 
   // Logo horizontal in corner
   slide.addImage({
-    path: `${ASSETS_BASE}/em-logo-horizontal.png`,
+    path: `${ASSETS_BASE}/em-logo-new.png`,
     x: 10.98,
-    y: 5.75,
+    y: 5.75 + (1.45 - 1.84 / LOGO_AR) / 2,
     w: 1.84,
-    h: 1.45,
-    sizing: { type: 'contain', w: 1.84, h: 1.45 },
+    h: 1.84 / LOGO_AR,
   });
 }
