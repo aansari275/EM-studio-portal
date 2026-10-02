@@ -1,6 +1,7 @@
 import pptxgen from 'pptxgenjs';
 import { orderedImages } from './img';
 import type { ShowroomProduct } from './firebase';
+import type { DeckImages } from './deckImages';
 
 // Brand colors (matching EMPL template)
 const COLORS = {
@@ -24,7 +25,7 @@ const FONTS = {
 // sizing:'contain', so every logo box derives its height from these instead of
 // hardcoding one that happens to be wrong.
 const LOGO_AR = 2498 / 963;   // em-logo-new.png
-const ICON_AR = 6300 / 2363;  // em-logo-icon.png
+const ICON_AR = 800 / 300;    // em-logo-icon.png, cut down from 6300px: it sits on every slide
 
 // PPT Assets base. Same-origin in the browser; the server-side generator
 // points this at a local directory, because pptxgenjs under Node reads image
@@ -37,17 +38,36 @@ export function setAssetsBase(base: string) {
 }
 
 /**
- * Generate a PowerPoint presentation matching EMPL template
- * Structure: 2 intro slides + product slides + 3 outro slides
+ * 'single' is the house product slide, one rug each. 'grid' is the colourway
+ * page from slides 7-9 of the house deck: eight rugs a slide, hero photo and a
+ * colour + size caption under each.
  */
+export type DeckLayout = 'single' | 'grid';
+
+export interface DeckOptions {
+  /** Pre-sized photos from loadDeckImages. Without it, slides embed the URLs as before. */
+  images?: DeckImages;
+  /** Photos past the fourth go onto 8-up slides after the rug's own slide. */
+  extraPhotos?: boolean;
+  layout?: DeckLayout;
+}
+
+// Set per build. Kept module-level like ASSETS_BASE so the slide helpers stay
+// small; buildPptx is synchronous, so two builds cannot interleave.
+let IMAGES: DeckImages | undefined;
+
 /**
  * Assemble the deck. Everything except writing it out, so the browser and the
  * MCP connector share one layout instead of drifting apart.
+ * Structure: 2 intro slides + product slides + 3 outro slides.
  */
 export function buildPptx(
   products: ShowroomProduct[],
-  title: string = 'Eastern Mills'
+  title: string = 'Eastern Mills',
+  opts: DeckOptions = {}
 ): pptxgen {
+  const { layout = 'single', extraPhotos = false } = opts;
+  IMAGES = opts.images;
   const pptx = new pptxgen();
 
   // Set presentation properties
@@ -64,9 +84,15 @@ export function buildPptx(
   addIntroSlide1(pptx);
   addIntroSlide2(pptx);
 
-  // Add product slides
-  for (const product of products) {
-    addProductSlide(pptx, product);
+  if (layout === 'grid') {
+    for (let i = 0; i < products.length; i += GRID.length) {
+      addColourwaySlide(pptx, products.slice(i, i + GRID.length));
+    }
+  } else {
+    for (const product of products) {
+      addProductSlide(pptx, product);
+      if (extraPhotos) addMorePhotoSlides(pptx, product);
+    }
   }
 
   // Add 3 outro slides (matching template slides 4, 5, 6)
@@ -82,9 +108,161 @@ export const deckFileName = () =>
 
 export async function generateProductPPT(
   products: ShowroomProduct[],
-  title: string = 'Eastern Mills'
+  title: string = 'Eastern Mills',
+  opts: DeckOptions = {}
 ): Promise<void> {
-  await buildPptx(products, title).writeFile({ fileName: deckFileName() });
+  await buildPptx(products, title, opts).writeFile({ fileName: deckFileName() });
+}
+
+/** Build the deck in memory, so its real size is known before it is saved. */
+export async function buildPptxBlob(
+  products: ShowroomProduct[],
+  title: string,
+  opts: DeckOptions
+): Promise<Blob> {
+  return (await buildPptx(products, title, opts).write({ outputType: 'blob' })) as Blob;
+}
+
+type Box = { x: number; y: number; w: number; h: number };
+
+// The house product slide. Do not "improve" these; see addProductSlide.
+const PRIMARY: Box = { x: 0.121, y: 0.273, w: 5.086, h: 7.118 };
+const REST: Box[] = [
+  { x: 5.149, y: 0.446, w: 4.861, h: 3.255 },
+  { x: 5.134, y: 3.921, w: 2.346, h: 3.396 },
+  { x: 8.362, y: 4.016, w: 4.766, h: 3.039 },
+];
+
+/**
+ * Every photo the deck will use and the slot it lands in, in inches. Photos
+ * are fetched at the slot's size rather than one flat width, so a grid cell
+ * does not carry the pixels of the hero.
+ */
+export function deckPhotoSlots(
+  products: ShowroomProduct[],
+  opts: Pick<DeckOptions, 'layout' | 'extraPhotos'> = {}
+): Array<{ url: string; w: number; h: number }> {
+  const { layout = 'single', extraPhotos = false } = opts;
+  return products.flatMap((p) => {
+    const all = orderedImages(p);
+    if (layout === 'grid') return all.slice(0, 1).map((url) => ({ url, w: GRID[0].w, h: GRID[0].h }));
+    const slots = [PRIMARY, ...REST];
+    return all
+      .slice(0, extraPhotos ? undefined : 4)
+      .map((url, i) => ({ url, w: (slots[i] || GRID[0]).w, h: (slots[i] || GRID[0]).h }));
+  });
+}
+
+/**
+ * Put a photo in a slot without stretching it. With pre-sized photos the real
+ * pixel size is known, so the rug is fitted inside the slot and centred. The
+ * URL fallback (the server-side generator) keeps the old behaviour.
+ * Returns false when there is nothing to show.
+ */
+function placeImage(
+  slide: pptxgen.Slide,
+  src: string | undefined,
+  box: Box,
+  valign: 'middle' | 'bottom' = 'middle'
+): boolean {
+  if (!src) return false;
+  if (!IMAGES) {
+    slide.addImage({ path: src, ...box, sizing: { type: 'contain', w: box.w, h: box.h } });
+    return true;
+  }
+  const img = IMAGES.get(src);
+  if (!img) return false;
+  const s = Math.min(box.w / img.w, box.h / img.h);
+  const w = img.w * s;
+  const h = img.h * s;
+  const y = valign === 'bottom' ? box.y + box.h - h : box.y + (box.h - h) / 2;
+  slide.addImage({ data: img.data, x: box.x + (box.w - w) / 2, y, w, h });
+  return true;
+}
+
+/** The spec lines in the house deck's own wording, skipping what a record lacks. */
+function specLines(product: ShowroomProduct): string[] {
+  const style = (product.styleNumber || product.baseStyleNumber || '').trim();
+  const lines: string[] = [];
+  if (style) lines.push(`STYLE NO. – ${style}`);
+  if (product.color) lines.push(`COLOR – ${product.color.toUpperCase()}`);
+  if (product.materials) lines.push(`MATERIAL – ${product.materials.toUpperCase()}`);
+  if (product.construction) lines.push(`${product.construction.toUpperCase()}`);
+  if (product.size) lines.push(`Size- ${product.size}`);
+  if (product.gsm) lines.push(`GSM- ${product.gsm}`);
+  return lines;
+}
+
+function addSpecBlock(slide: pptxgen.Slide, product: ShowroomProduct) {
+  const lines = specLines(product);
+  if (!lines.length) return;
+  slide.addText(lines.join('\n'), {
+    x: 10.593,
+    y: 1.223,
+    w: 2.74,
+    h: 1.533,
+    fontSize: 12,
+    fontFace: FONTS.main,
+    color: COLORS.gray,
+    valign: 'top',
+    lineSpacingMultiple: 1.2,
+  });
+}
+
+/**
+ * The 8-up grid from slides 7-9 of the house deck: four across, two down, a
+ * caption under each. The house deck's cells were placed by hand and wander by
+ * a tenth of an inch; these are the averages, squared up.
+ */
+const GRID: Box[] = [0.33, 3.86].flatMap((y) =>
+  [1.72, 3.92, 6.12, 8.32].map((x) => ({ x, y, w: 2.19, h: 3.12 }))
+);
+
+function addCaption(slide: pptxgen.Slide, text: string, cell: Box) {
+  if (!text) return;
+  slide.addText(text, {
+    x: cell.x,
+    y: cell.y + cell.h + 0.02,
+    w: cell.w,
+    h: 0.23,
+    fontSize: 10.5,
+    fontFace: FONTS.main,
+    color: COLORS.gray,
+    align: 'center',
+    valign: 'top',
+    fit: 'shrink',
+  });
+}
+
+/** Up to eight rugs on one slide, hero photo each, colour and size underneath. */
+function addColourwaySlide(pptx: pptxgen, products: ShowroomProduct[]) {
+  const slide = pptx.addSlide();
+  addCornerLogo(slide);
+  products.forEach((p, i) => {
+    const cell = GRID[i];
+    // Seated on the bottom of the cell so the caption sits under the rug, not under a gap.
+    if (!placeImage(slide, orderedImages(p)[0], cell, 'bottom')) {
+      slide.addShape('rect', { ...cell, fill: { color: 'F5F5F5' } });
+    }
+    const label = [p.color?.toUpperCase(), p.size?.toUpperCase()].filter(Boolean).join(' ')
+      || (p.styleNumber || p.baseStyleNumber || '').trim();
+    addCaption(slide, label, cell);
+  });
+}
+
+/**
+ * Photos past the fourth, eight to a slide, straight after the rug's own
+ * slide. Same spec block on the right so a buyer flicking through still knows
+ * which rug they are looking at.
+ */
+function addMorePhotoSlides(pptx: pptxgen, product: ShowroomProduct) {
+  const more = orderedImages(product).slice(4).filter((u) => !IMAGES || IMAGES.has(u));
+  for (let i = 0; i < more.length; i += GRID.length) {
+    const slide = pptx.addSlide();
+    addCornerLogo(slide);
+    more.slice(i, i + GRID.length).forEach((src, j) => placeImage(slide, src, GRID[j], 'bottom'));
+    addSpecBlock(slide, product);
+  }
 }
 
 /**
@@ -224,50 +402,18 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   addCornerLogo(slide);
 
   // === PRIMARY: tall portrait down the left ===
-  if (images[0]) {
-    slide.addImage({ path: images[0], x: 0.121, y: 0.273, w: 5.086, h: 7.118,
-      sizing: { type: 'contain', w: 5.086, h: 7.118 } });
-  } else {
-    slide.addShape('rect', { x: 0.121, y: 0.273, w: 5.086, h: 7.118, fill: { color: 'F5F5F5' } });
+  if (!placeImage(slide, images[0], PRIMARY)) {
+    slide.addShape('rect', { ...PRIMARY, fill: { color: 'F5F5F5' } });
     slide.addText('No Image', { x: 0.121, y: 3.5, w: 5.086, h: 0.5, fontSize: 16,
       fontFace: FONTS.main, color: COLORS.gray, align: 'center' });
   }
 
   // === SECOND, THIRD, FOURTH ===
-  const rest: Array<{ x: number; y: number; w: number; h: number }> = [
-    { x: 5.149, y: 0.446, w: 4.861, h: 3.255 },
-    { x: 5.134, y: 3.921, w: 2.346, h: 3.396 },
-    { x: 8.362, y: 4.016, w: 4.766, h: 3.039 },
-  ];
-  rest.forEach((box, i) => {
-    const src = images[i + 1];
-    if (src) slide.addImage({ path: src, ...box, sizing: { type: 'contain', w: box.w, h: box.h } });
-  });
+  REST.forEach((box, i) => placeImage(slide, images[i + 1], box));
 
   // === RIGHT: the spec block ===
   // Same four labels and the same dash style as the house deck.
-  const style = (product.styleNumber || product.baseStyleNumber || '').trim();
-  const lines: string[] = [];
-  if (style) lines.push(`STYLE NO. – ${style}`);
-  if (product.color) lines.push(`COLOR – ${product.color.toUpperCase()}`);
-  if (product.materials) lines.push(`MATERIAL – ${product.materials.toUpperCase()}`);
-  if (product.construction) lines.push(`${product.construction.toUpperCase()}`);
-  if (product.size) lines.push(`Size- ${product.size}`);
-  if (product.gsm) lines.push(`GSM- ${product.gsm}`);
-
-  if (lines.length) {
-    slide.addText(lines.join('\n'), {
-      x: 10.593,
-      y: 1.223,
-      w: 2.74,
-      h: 1.533,
-      fontSize: 12,
-      fontFace: FONTS.main,
-      color: COLORS.gray,
-      valign: 'top',
-      lineSpacingMultiple: 1.2,
-    });
-  }
+  addSpecBlock(slide, product);
 }
 
 /**

@@ -10,7 +10,7 @@ import {
   getLibraryVariants,
 } from '../lib/library';
 import { useSelection } from '../lib/selection';
-import { generateProductPPT } from '../lib/pptGenerator';
+import PptDialog from '../components/PptDialog';
 import { createCatalog, catalogUrl } from '../lib/catalogs';
 import { signOutUser, currentUserEmail } from '../lib/auth';
 import { thumb, heroImage, orderedImages } from '../lib/img';
@@ -457,7 +457,8 @@ function Row({ k, v }: { k: string; v?: string }) {
 
 function Tray({ onDone }: { onDone: (id: string) => void }) {
   const tray = useSelection();
-  const [busy, setBusy] = useState<'ppt' | 'link' | null>(null);
+  const [busy, setBusy] = useState<'link' | null>(null);
+  const [pptOpen, setPptOpen] = useState(false);
   const [asking, setAsking] = useState(false);
   const [buyer, setBuyer] = useState('');
   const [error, setError] = useState('');
@@ -471,13 +472,6 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
   }
 
   const noPhotos = tray.items.filter((p) => !p.firebaseUrl).length;
-
-  async function makePpt() {
-    setBusy('ppt'); setError('');
-    try { await generateProductPPT(tray.items, 'Eastern Mills'); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Could not build the PPT.'); }
-    finally { setBusy(null); }
-  }
 
   async function makeLink() {
     if (!buyer.trim()) return setError('Type who this is for.');
@@ -521,9 +515,9 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
           </>
         ) : (
           <>
-            <button onClick={makePpt} disabled={busy !== null}
+            <button onClick={() => { setError(''); setPptOpen(true); }} disabled={busy !== null}
               className="rounded-sm border border-neutral-200 px-[18px] py-2.5 text-[13px] font-semibold hover:border-neutral-400 disabled:opacity-60">
-              {busy === 'ppt' ? 'Building…' : 'Download PPT'}
+              Download PPT
             </button>
             <button onClick={() => setAsking(true)}
               className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white">
@@ -533,6 +527,7 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
         )}
       </div>
       {error && <p className="px-7 pb-3 text-[12.5px] text-red-600">{error}</p>}
+      {pptOpen && <PptDialog products={tray.items} onClose={() => setPptOpen(false)} />}
     </div>
   );
 }

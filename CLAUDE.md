@@ -259,3 +259,14 @@ netlify deploy --prod
 - **Product slides**: Logo icon in corner, product image, details table (GSM included)
 - **Outro slides**: 3 slides matching EMPL template (gallery, factory info, closing)
 - Assets stored in `public/ppt-assets/`
+
+## PPT photo sizing and the 25 MB check (2 Oct 2026)
+
+- **Nothing is compressed at upload.** Originals stay the archive. Each deck fetches its own copies through the Netlify Image CDN (`src/lib/deckImages.ts`), sized **per slot** at 300 pixels per inch (`deckPhotoSlots` in `pptGenerator.ts`), with `fit=contain` so the whole rug is kept.
+- Measured on real products: 6 rugs with all 101 photos was **65 MB** at a flat 1600px, **19.6 MB** per slot. 24 rugs on grid slides 5.3 MB. 3 rugs, 4 photos 5.1 MB (was 67 MB with originals).
+- **`em-logo-icon.png` was 6300px, 312 KB, and pptxgenjs embeds it once per slide**: 6.5 MB of a 26 MB deck. Cut to 800x300, 7 KB. Keep every asset that goes on every slide small.
+- Photos are fitted inside their slot from their real pixel size, no stretching. The house slot positions are unchanged.
+- `PptDialog` builds the deck in memory first. Over 25 MB it offers an email-friendly copy, stepping down 220/180/144/110 ppi until it fits.
+- Layouts: one rug per slide (optionally with photos past the fourth on 8-up slides after it), or eight rugs per slide (colourway grid from slides 7-9 of the Zara deck, caption = colour + size, falling back to style no.).
+- Some stored `.jpg` files are really HTML (e.g. `products/EM-206/image-5.jpg`). They are skipped and the slot stays empty, the deck still builds.
+- The server-side generator still calls `buildPptx(products, title)` with no options, so it keeps the old URL behaviour.

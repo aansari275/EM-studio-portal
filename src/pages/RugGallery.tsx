@@ -26,7 +26,7 @@ import {
   type ShowroomProduct,
 } from '../lib/firebase';
 import { cn, compressImage } from '../lib/utils';
-import { generateProductPPT } from '../lib/pptGenerator';
+import PptDialog from '../components/PptDialog';
 
 const PAGE_SIZE = 60;
 
@@ -146,26 +146,9 @@ export function RugGallery() {
     setSelectMode(false);
   };
 
-  // Create PPT state
-  const [creatingPPT, setCreatingPPT] = useState(false);
-
-  // Create PPT
-  const createPPT = async () => {
-    const selected = allProducts.filter(p => selectedIds.has(p.id));
-    if (selected.length === 0) return;
-
-    setCreatingPPT(true);
-    try {
-      await generateProductPPT(selected, 'Eastern Mills - Rug Gallery');
-      // Clear selection after successful PPT creation
-      clearSelection();
-    } catch (error) {
-      console.error('Error creating PPT:', error);
-      alert('Failed to create PPT. Please try again.');
-    } finally {
-      setCreatingPPT(false);
-    }
-  };
+  // PPT options and size check live in the dialog
+  const [pptOpen, setPptOpen] = useState(false);
+  const selectedProducts = allProducts.filter(p => selectedIds.has(p.id));
 
   const displayProducts = allProducts.length > 0 ? allProducts : (initialProducts || []);
 
@@ -309,42 +292,23 @@ export function RugGallery() {
               {selectedIds.size} product{selectedIds.size !== 1 ? 's' : ''} selected
             </span>
             <button
-              onClick={createPPT}
-              disabled={creatingPPT}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium transition-colors",
-                creatingPPT ? "opacity-70 cursor-not-allowed" : "hover:bg-primary/90"
-              )}
+              onClick={() => setPptOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium transition-colors hover:bg-primary/90"
             >
-              {creatingPPT ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Creating PPT...
-                </>
-              ) : (
-                <>
-                  <FileImage className="w-5 h-5" />
-                  Create PPT
-                </>
-              )}
+              <FileImage className="w-5 h-5" />
+              Create PPT
             </button>
           </div>
         </div>
       )}
 
-      {/* Full screen loading overlay for PPT creation */}
-      {creatingPPT && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl p-6 flex flex-col items-center gap-4 max-w-sm mx-4">
-            <Loader2 className="w-10 h-10 text-primary animate-spin" />
-            <div className="text-center">
-              <h3 className="font-semibold text-gray-900">Creating Presentation</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Generating {selectedIds.size} slide{selectedIds.size !== 1 ? 's' : ''}...
-              </p>
-            </div>
-          </div>
-        </div>
+      {pptOpen && selectedProducts.length > 0 && (
+        <PptDialog
+          products={selectedProducts}
+          title="Eastern Mills - Rug Gallery"
+          onClose={() => setPptOpen(false)}
+          onSaved={clearSelection}
+        />
       )}
     </div>
   );
