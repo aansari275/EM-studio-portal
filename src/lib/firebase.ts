@@ -720,6 +720,18 @@ function loadAllShowroomDocs(): Promise<any[]> {
 
 export async function searchShowroomProducts(searchTerm: string, limitCount: number = 200): Promise<ShowroomProduct[]> {
   try {
+    // Server-side first: the function keeps a slim index of every record, so
+    // the browser only receives the matches. The local scan below stays as a
+    // fallback for `vite dev`, where Netlify functions are not running.
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(searchTerm)}&n=${limitCount}`);
+      if (res.ok) {
+        const { items } = await res.json();
+        if (Array.isArray(items)) return items.map((d: any) => mapShowroomData(d.id, d));
+      }
+    } catch {
+      /* fall through to the local scan */
+    }
     const allDocs = await loadAllShowroomDocs();
 
     const term = searchTerm.toLowerCase();
@@ -755,7 +767,11 @@ export async function searchShowroomProducts(searchTerm: string, limitCount: num
  * Map Firestore doc to ShowroomProduct
  */
 function mapShowroomDoc(docSnap: any): ShowroomProduct {
-  const data = docSnap.data();
+  return mapShowroomData(docSnap.id, docSnap.data());
+}
+
+/** Same mapping for a plain object, as returned by /api/search. */
+export function mapShowroomData(id: string, data: any): ShowroomProduct {
 
   const mainImage = data.firebaseUrl || data.imageUrl || '';
   // Support both field names: additionalImages (showroom) and additionalImageUrls (heimtextil)
@@ -774,7 +790,7 @@ function mapShowroomDoc(docSnap: any): ShowroomProduct {
   }
 
   return {
-    id: docSnap.id,
+    id,
     baseStyleNumber,
     styleNumber: data.styleNumber || data.displayName || '',
     displayName: data.displayName || data.styleNumber || '',

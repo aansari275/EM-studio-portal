@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, X, Undo2, Scissors } from 'lucide-react';
-import { removeBackground } from '../lib/bgremove';
 
 /**
  * A grid of photo thumbnails with a + tile on the end.
@@ -52,6 +51,9 @@ export function PhotoPicker({
     onChange(next);
     for (const [slot, i] of todo) {
       try {
+        // The model runtime is ~1.5 MB of JS plus a 28 MB wasm, so it loads
+        // only when someone actually asks for a background to be removed.
+        const { removeBackground } = await import('../lib/bgremove');
         const { file, keptPct } = await removeBackground(slot.file);
         next = next.map((s, j) =>
           j === i ? { file, original: slot.file, keptPct, working: false } : s

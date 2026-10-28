@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Search, Check, X, Plus } from 'lucide-react';
@@ -10,7 +10,7 @@ import {
   getLibraryVariants,
 } from '../lib/library';
 import { useSelection } from '../lib/selection';
-import PptDialog from '../components/PptDialog';
+const PptDialog = lazy(() => import('../components/PptDialog'));
 import { createCatalog, catalogUrl } from '../lib/catalogs';
 import { signOutUser, currentUserEmail } from '../lib/auth';
 import { thumb, heroImage, orderedImages } from '../lib/img';
@@ -52,6 +52,10 @@ export function Library() {
     const t = setTimeout(() => setDebounced(term.trim()), 150);
     return () => clearTimeout(t);
   }, [term]);
+
+  // Wake the search function while the grid loads, so the first letter typed
+  // does not wait on a cold start.
+  useEffect(() => { fetch('/api/search?warm=1').catch(() => {}); }, []);
 
   const { data: total } = useQuery({ queryKey: ['library-count'], queryFn: getLibraryCount });
 
@@ -530,7 +534,7 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
         )}
       </div>
       {error && <p className="px-7 pb-3 text-[12.5px] text-red-600">{error}</p>}
-      {pptOpen && <PptDialog products={tray.items} onClose={() => setPptOpen(false)} />}
+      {pptOpen && <Suspense fallback={null}><PptDialog products={tray.items} onClose={() => setPptOpen(false)} /></Suspense>}
     </div>
   );
 }

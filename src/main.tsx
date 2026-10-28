@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
@@ -6,7 +6,8 @@ import './index.css'
 import App from './App'
 import { AuthGate } from './components/AuthGate'
 import { SelectionProvider } from './lib/selection'
-import { CatalogView } from './pages/CatalogView'
+// Buyer links are their own small bundle: a buyer never downloads the studio app.
+const CatalogView = lazy(() => import('./pages/CatalogView').then((m) => ({ default: m.CatalogView })))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,7 +24,7 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <Routes>
           {/* Buyer-facing. Deliberately OUTSIDE AuthGate: a buyer has no account. */}
-          <Route path="/c/:id" element={<CatalogView />} />
+          <Route path="/c/:id" element={<Suspense fallback={null}><CatalogView /></Suspense>} />
           <Route
             path="*"
             element={

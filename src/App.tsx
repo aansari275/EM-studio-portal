@@ -1,17 +1,23 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Library } from './pages/Library';
-import { MyLinks } from './pages/MyLinks';
-import { More } from './pages/More';
-import { StudioDashboard } from './pages/StudioDashboard';
-import { UploadPhotos } from './pages/UploadPhotos';
-import { RugGallery, RugGalleryDetail } from './pages/RugGallery';
-import { AdminMigrate } from './pages/AdminMigrate';
+
+// Only the library loads up front. The rest are opened rarely and carry heavy
+// dependencies, so they download when first visited.
+const MyLinks = lazy(() => import('./pages/MyLinks').then((m) => ({ default: m.MyLinks })));
+const More = lazy(() => import('./pages/More').then((m) => ({ default: m.More })));
+const StudioDashboard = lazy(() => import('./pages/StudioDashboard').then((m) => ({ default: m.StudioDashboard })));
+const UploadPhotos = lazy(() => import('./pages/UploadPhotos').then((m) => ({ default: m.UploadPhotos })));
+const RugGallery = lazy(() => import('./pages/RugGallery').then((m) => ({ default: m.RugGallery })));
+const RugGalleryDetail = lazy(() => import('./pages/RugGallery').then((m) => ({ default: m.RugGalleryDetail })));
+const AdminMigrate = lazy(() => import('./pages/AdminMigrate').then((m) => ({ default: m.AdminMigrate })));
 
 /**
  * Signed-in routes. The buyer-facing /c/:id lives in main.tsx, outside AuthGate.
  */
 function App() {
   return (
+    <Suspense fallback={<p className="py-16 text-center text-sm text-neutral-400">Loading…</p>}>
     <Routes>
       <Route path="/" element={<Library />} />
       <Route path="/links" element={<MyLinks />} />
@@ -29,6 +35,7 @@ function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 
