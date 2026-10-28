@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Search, Check, X, Plus } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import {
@@ -49,7 +49,7 @@ export function Library() {
   const qc = useQueryClient();
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(term.trim()), 300);
+    const t = setTimeout(() => setDebounced(term.trim()), 150);
     return () => clearTimeout(t);
   }, [term]);
 
@@ -58,6 +58,9 @@ export function Library() {
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['library', debounced],
     queryFn: () => (debounced ? searchLibrary(debounced, 300) : getLibraryProducts(200)),
+    // Keep the last results on screen while the next letter is looked up, so
+    // the grid narrows as she types instead of blinking to "Loading".
+    placeholderData: keepPreviousData,
   });
 
   // Chips are built from what actually loaded, never hardcoded. The first

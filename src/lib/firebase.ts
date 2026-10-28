@@ -679,28 +679,48 @@ export async function getShowroomProductsCount(): Promise<number> {
  * Search showroom products by name, style number, color, etc.
  * Fetches all products and filters client-side (Firestore doesn't support full-text search)
  */
-export async function searchShowroomProducts(searchTerm: string, limitCount: number = 200): Promise<ShowroomProduct[]> {
-  try {
+/**
+ * The whole showroom set, downloaded once and reused for every keystroke.
+ * Search is a substring match done here in the browser, so re-downloading
+ * thousands of documents per letter typed made live search feel dead.
+ * Anything that writes a product calls invalidateShowroomCache().
+ */
+let showroomDocsCache: { at: number; docs: Promise<any[]> } | null = null;
+const SHOWROOM_CACHE_MS = 5 * 60 * 1000;
+
+export function invalidateShowroomCache() {
+  showroomDocsCache = null;
+}
+
+function loadAllShowroomDocs(): Promise<any[]> {
+  if (showroomDocsCache && Date.now() - showroomDocsCache.at < SHOWROOM_CACHE_MS) {
+    return showroomDocsCache.docs;
+  }
+  const docs = (async () => {
     const showroomRef = collection(db, SHOWROOM_COLLECTION);
-    // Fetch all products for search (paginated)
     const allDocs: any[] = [];
     let lastDoc: any = null;
     const batchSize = 500;
-
-    // Fetch up to 10,000 products for search
     while (allDocs.length < 10000) {
       const q = lastDoc
         ? query(showroomRef, orderBy('createdAt', 'desc'), limit(batchSize), startAfter(lastDoc))
         : query(showroomRef, orderBy('createdAt', 'desc'), limit(batchSize));
-
       const snapshot = await getDocs(q);
       if (snapshot.empty) break;
-
       allDocs.push(...snapshot.docs);
       lastDoc = snapshot.docs[snapshot.docs.length - 1];
-
       if (snapshot.docs.length < batchSize) break;
     }
+    return allDocs;
+  })();
+  showroomDocsCache = { at: Date.now(), docs };
+  docs.catch(() => { showroomDocsCache = null; });
+  return docs;
+}
+
+export async function searchShowroomProducts(searchTerm: string, limitCount: number = 200): Promise<ShowroomProduct[]> {
+  try {
+    const allDocs = await loadAllShowroomDocs();
 
     const term = searchTerm.toLowerCase();
     const filtered = allDocs
@@ -1502,6 +1522,7 @@ export async function createShowroomProduct(input: NewProductInput): Promise<Sho
   }
 
   await setDoc(doc(db, SHOWROOM_COLLECTION, slug), payload);
+  invalidateShowroomCache();
   const created = await getDoc(doc(db, SHOWROOM_COLLECTION, slug));
   return mapShowroomDoc(created);
 }
@@ -1555,6 +1576,7 @@ export async function addProductPhotos(
   }
 
   await updateDoc(docRef, { firebaseUrl: hero, additionalImages: extras, updatedAt: serverTimestamp() });
+  invalidateShowroomCache();
   const fresh = await getDoc(docRef);
   return mapShowroomDoc(fresh);
 }

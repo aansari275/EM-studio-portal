@@ -131,7 +131,10 @@ export async function searchEmProducts(term: string, n = 150): Promise<ShowroomP
                 where('styleKey', '<=', t + ''), qlimit(n))),
   ];
   if (serial) {
-    jobs.push(runEm(query(collection(db, EM), where('serial', '==', serial), qlimit(n))));
+    // Prefix, not equality: typing "80" should already list 8039, 8012, 8077
+    // while the studio is still typing, not only once all four digits are in.
+    jobs.push(runEm(query(collection(db, EM), where('serial', '>=', serial),
+                          where('serial', '<=', serial + '\uf8ff'), qlimit(n))));
   }
   const found = (await Promise.all(jobs.map((p) => p.catch(() => [])))).flat();
   const seen = new Set<string>();
