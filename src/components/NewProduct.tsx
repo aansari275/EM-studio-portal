@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Plus } from 'lucide-react';
-import { createShowroomProduct, addProductPhotos, type ShowroomProduct } from '../lib/firebase';
+import {
+  createShowroomProduct, addProductPhotos, findDuplicateStyle, styleKey, type ShowroomProduct,
+} from '../lib/firebase';
 import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } from '../lib/options';
 import { PhotoPicker } from './PhotoPicker';
 
@@ -12,16 +14,36 @@ import { PhotoPicker } from './PhotoPicker';
  * studio usually photographs before the specs are settled, and a half-filled
  * record that exists beats a complete one that does not. There is no separate
  * name: the design number is the name.
+ *
+ * `initial` prefills the specs when copying an existing design. The design
+ * number and photos are never carried over: a copy is a new design.
  */
+export type NewProductInitial = Partial<Record<'construction' | 'materials' | 'color' | 'size' | 'gsm', string>>;
+
 export function NewProduct({
+  initial,
   onClose,
   onCreated,
+  onOpenExisting,
 }: {
+  initial?: NewProductInitial;
   onClose: () => void;
   onCreated: (p: ShowroomProduct) => void;
+  onOpenExisting?: (p: ShowroomProduct) => void;
 }) {
-  const [f, setF] = useState({ styleNumber: '', construction: '', color: '', size: '', gsm: '' });
-  const [materials, setMaterials] = useState<string[]>(['']);
+  const [f, setF] = useState({
+    styleNumber: '',
+    construction: initial?.construction || '',
+    color: initial?.color || '',
+    size: initial?.size || '',
+    gsm: initial?.gsm || '',
+  });
+  // Stored as one comma separated string; the form edits one row per material.
+  const [materials, setMaterials] = useState<string[]>(() => {
+    const list = (initial?.materials || '').split(',').map((m) => m.trim()).filter(Boolean);
+    return list.length ? list : [''];
+  });
+  const copying = !!(initial && Object.values(initial).some(Boolean));
   const [slots, setSlots] = useState<{ file: File; original?: File }[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -39,6 +61,26 @@ export function NewProduct({
 
   const set = (k: keyof typeof f) => (v: string) => setF((cur) => ({ ...cur, [k]: v }));
 
+  // Look for the same style number while it is typed, ignoring case, spaces,
+  // dashes and dots. A match warns but does not block: two spellings of one
+  // number can be two genuine designs, so the second click decides.
+  const typedKey = styleKey(f.styleNumber);
+  const [checkKey, setCheckKey] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setCheckKey(typedKey), 300);
+    return () => clearTimeout(t);
+  }, [typedKey]);
+  const { data: existing } = useQuery({
+    queryKey: ['style-duplicate', checkKey],
+    queryFn: () => findDuplicateStyle(f.styleNumber),
+    enabled: checkKey.length >= 3,
+    staleTime: 30_000,
+  });
+  // Ignore an answer that belongs to what was typed a moment ago.
+  const duplicate = checkKey === typedKey && checkKey.length >= 3 ? existing ?? null : null;
+  const [armedFor, setArmedFor] = useState('');
+  const confirming = !!duplicate && armedFor === typedKey;
+
   /** A value typed with "+ Add new" is saved for everyone, then selected. */
   const addOption = (kind: OptionKind) => async (v: string) => {
     try {
@@ -51,6 +93,7 @@ export function NewProduct({
 
   async function save() {
     if (!f.styleNumber.trim()) return setError('Type the design number first.');
+    if (duplicate && !confirming) return setArmedFor(typedKey);
     setError('');
     try {
       setBusy('Creating…');
@@ -80,6 +123,7 @@ export function NewProduct({
       <div className="w-full max-w-lg rounded-md bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-4 border-b border-neutral-100 px-6 py-5">
           <h2 className="font-serif text-[22px]">New design</h2>
+          {copying && <span className="text-[12px] text-neutral-400">Specs copied. Add the number and photos.</span>}
           <div className="flex-1" />
           <button onClick={onClose} aria-label="Close"
             className="rounded p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900">
@@ -90,6 +134,21 @@ export function NewProduct({
         <div className="space-y-5 px-6 py-6">
           <Field label="Design number" required hint="For example EM-26-MA-7420"
             value={f.styleNumber} onChange={set('styleNumber')} autoFocus onEnter={save} />
+          {duplicate && (
+            <div role="status" className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-[#98671A] bg-[#98671A]/[0.06] px-3 py-2 text-[12.5px] text-[#7a5215]">
+              <span>
+                This style number already exists
+                {duplicate.styleNumber && styleKey(duplicate.styleNumber) === typedKey && duplicate.styleNumber !== f.styleNumber.trim()
+                  ? ` as ${duplicate.styleNumber}.` : '.'}
+              </span>
+              {onOpenExisting && (
+                <button type="button" onClick={() => onOpenExisting(duplicate)}
+                  className="font-semibold text-[#2F4C69] hover:underline">
+                  Open the existing design
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="grid gap-5 sm:grid-cols-2">
             <Choice label="Construction" value={f.construction} onChange={set('construction')}
@@ -141,14 +200,16 @@ export function NewProduct({
 
         <div className="flex items-center gap-3 border-t border-neutral-100 px-6 py-4">
           <p className="flex-1 text-[12.5px] text-neutral-400">
-            {slots.length
-              ? `${slots.length} photo${slots.length > 1 ? 's' : ''} ready. The first is the main one.`
-              : 'Add as many photos as you like, or add them later.'}
+            {confirming
+              ? 'Press Save anyway to create it as well.'
+              : slots.length
+                ? `${slots.length} photo${slots.length > 1 ? 's' : ''} ready. The first is the main one.`
+                : 'Add as many photos as you like, or add them later.'}
           </p>
           <button onClick={onClose} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
           <button onClick={save} disabled={!!busy}
             className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
-            {busy || 'Create design'}
+            {busy || (confirming ? 'Save anyway' : 'Create design')}
           </button>
         </div>
       </div>

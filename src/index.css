@@ -61,3 +61,9 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
 }
+
+/* The library's search progress bar: a third-width bar sweeping across. */
+@keyframes em-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

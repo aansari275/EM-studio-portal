@@ -3,7 +3,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
-  getShowroomProducts, searchShowroomProducts, getDesignVariants,
+  getShowroomProducts, searchShowroomProducts, searchShowroomPage, getDesignVariants,
   type ShowroomProduct,
 } from './firebase';
 
@@ -179,6 +179,47 @@ export async function searchLibrary(term: string, n = 300): Promise<ShowroomProd
     searchEmProducts(term, Math.min(n, 150)).catch(() => []),
   ]);
   return dedupe([...showroom, ...em]);
+}
+
+export const LIBRARY_PAGE = 60;
+
+export interface LibraryPage {
+  items: ShowroomProduct[];
+  /** Showroom offset of the next page, or null when there is no more. */
+  nextOffset: number | null;
+}
+
+/**
+ * One page of a library search. Only the showroom side pages: the archive is
+ * an indexed prefix lookup capped at 150, so it comes back whole with the
+ * first page and later pages are showroom records only.
+ */
+export async function searchLibraryPage(term: string, offset = 0, n = LIBRARY_PAGE): Promise<LibraryPage> {
+  const [showroom, em] = await Promise.all([
+    searchShowroomPage(term, offset, n).catch(() => ({ items: [], total: 0, nextOffset: null })),
+    offset === 0 ? searchEmProducts(term, 150).catch(() => []) : Promise.resolve([]),
+  ]);
+  return { items: dedupe([...showroom.items, ...em]), nextOffset: showroom.nextOffset };
+}
+
+/**
+ * Pages joined in order. A later showroom page can carry a style the archive
+ * already supplied on page one; the showroom record takes that slot in place,
+ * so nothing jumps around under her while she scrolls.
+ */
+export function joinPages(pages: LibraryPage[]): ShowroomProduct[] {
+  const out: ShowroomProduct[] = [];
+  const at = new Map<string, number>();
+  const keyOf = (p: ShowroomProduct) => `${normStyle(p.styleNumber)}|${(p.color || '').toUpperCase().trim()}`;
+  for (const page of pages) {
+    for (const p of page.items) {
+      const k = keyOf(p);
+      const i = at.get(k);
+      if (i === undefined) { at.set(k, out.length); out.push(p); }
+      else if (out[i].source === 'ppt_archive' && p.source !== 'ppt_archive') out[i] = p;
+    }
+  }
+  return out;
 }
 
 export async function getLibraryVariants(baseStyleNumber: string): Promise<ShowroomProduct[]> {

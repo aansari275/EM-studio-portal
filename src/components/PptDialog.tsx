@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
-import type { ShowroomProduct } from '../lib/firebase';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db, type ShowroomProduct } from '../lib/firebase';
+import { currentUserUid } from '../lib/auth';
 import { orderedImages } from '../lib/img';
 import { buildPptxBlob, deckFileName, deckPhotoSlots, type DeckLayout } from '../lib/pptGenerator';
 import { loadDeckImages, FULL, EMAIL_STEPS, EMAIL_LIMIT, type Quality } from '../lib/deckImages';
@@ -18,6 +20,31 @@ type Step =
   | { kind: 'big'; blob: Blob }
   | { kind: 'saved'; bytes: number; note?: string }
   | { kind: 'error'; message: string };
+
+/**
+ * The last deck setup, per person, in config/ppt_prefs_<uid>. Read when the
+ * dialog opens and written when a deck is built. Both fail silently: without
+ * them the dialog simply starts from the defaults, as it always did.
+ */
+interface DeckPrefs { layout: DeckLayout; extraPhotos: boolean }
+const prefsRef = (uid: string) => doc(db, 'config', `ppt_prefs_${uid}`);
+
+async function loadPrefs(): Promise<Partial<DeckPrefs> | null> {
+  const uid = currentUserUid();
+  if (!uid) return null;
+  const d = (await getDoc(prefsRef(uid))).data();
+  if (!d) return null;
+  return {
+    layout: d.layout === 'grid' || d.layout === 'single' ? d.layout : undefined,
+    extraPhotos: typeof d.extraPhotos === 'boolean' ? d.extraPhotos : undefined,
+  };
+}
+
+function savePrefs(p: DeckPrefs) {
+  const uid = currentUserUid();
+  if (!uid) return;
+  setDoc(prefsRef(uid), { ...p, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+}
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
@@ -46,6 +73,21 @@ export default function PptDialog({
   const [extraPhotos, setExtraPhotos] = useState(true);
   const [step, setStep] = useState<Step>({ kind: 'options' });
 
+  // Apply the saved setup unless she has already changed something herself.
+  const touched = useRef(false);
+  useEffect(() => {
+    let live = true;
+    loadPrefs()
+      .then((p) => {
+        if (!live || !p || touched.current) return;
+        if (p.layout) setLayout(p.layout);
+        if (p.extraPhotos !== undefined) setExtraPhotos(p.extraPhotos);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const pickLayout = (l: DeckLayout) => { touched.current = true; setLayout(l); };
+
   const extra = useMemo(() => {
     const counts = products.map((p) => Math.max(0, orderedImages(p).length - 4));
     return { photos: counts.reduce((a, b) => a + b, 0), rugs: counts.filter(Boolean).length };
@@ -72,6 +114,7 @@ export default function PptDialog({
 
   const buildFull = () =>
     run(async () => {
+      savePrefs({ layout, extraPhotos });
       const blob = await build(FULL, 'Preparing photos');
       if (blob.size > EMAIL_LIMIT) return setStep({ kind: 'big', blob });
       save(blob);
@@ -125,13 +168,13 @@ export default function PptDialog({
               <legend className="mb-2 text-[12px] uppercase tracking-wider text-neutral-400">Layout</legend>
               <Choice
                 checked={layout === 'single'}
-                onChange={() => setLayout('single')}
+                onChange={() => pickLayout('single')}
                 title="One rug per slide"
                 hint="The house slide: large photo and three more"
               />
               <Choice
                 checked={layout === 'grid'}
-                onChange={() => setLayout('grid')}
+                onChange={() => pickLayout('grid')}
                 title="Eight rugs per slide"
                 hint="Colourway grid, colour and size under each"
               />
@@ -142,7 +185,7 @@ export default function PptDialog({
                 <input
                   type="checkbox"
                   checked={extraPhotos}
-                  onChange={(e) => setExtraPhotos(e.target.checked)}
+                  onChange={(e) => { touched.current = true; setExtraPhotos(e.target.checked); }}
                   className="mt-0.5 accent-[#2F4C69]"
                 />
                 <span>

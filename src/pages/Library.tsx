@@ -1,21 +1,23 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { Search, Check, X, Plus } from 'lucide-react';
+import { useQuery, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { Search, Check, X, Plus, Copy } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import {
   getLibraryProducts,
-  searchLibrary,
+  searchLibraryPage,
+  joinPages,
   getLibraryCount,
   getLibraryVariants,
+  type LibraryPage,
 } from '../lib/library';
 import { useSelection } from '../lib/selection';
 const PptDialog = lazy(() => import('../components/PptDialog'));
-import { createCatalog, catalogUrl } from '../lib/catalogs';
+import { createCatalog, catalogUrl, EXPIRY_CHOICES } from '../lib/catalogs';
 import { signOutUser, currentUserEmail } from '../lib/auth';
 import { thumb, heroImage, orderedImages } from '../lib/img';
 import { canonicalConstruction } from '../lib/library';
-import { NewProduct } from '../components/NewProduct';
+import { NewProduct, type NewProductInitial } from '../components/NewProduct';
 import { PhotoDrop } from '../components/PhotoDrop';
 
 /**
@@ -43,7 +45,8 @@ export function Library() {
   const [build, setBuild] = useState('');
   const [needsPhotos, setNeedsPhotos] = useState(false);
   const [open, setOpen] = useState<ShowroomProduct | null>(null);
-  const [creating, setCreating] = useState(false);
+  // null: closed. An object: open, prefilled from it (empty for a fresh design).
+  const [creating, setCreating] = useState<NewProductInitial | null>(null);
   const tray = useSelection();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -59,13 +62,28 @@ export function Library() {
 
   const { data: total } = useQuery({ queryKey: ['library-count'], queryFn: getLibraryCount });
 
-  const { data: products = [], isLoading } = useQuery({
+  // Searches come 60 at a time and the next page loads as she nears the
+  // bottom. A broad term like "80" matches thousands; waiting for 300 full
+  // records before showing any was the lag. Browsing with nothing typed stays
+  // a single page of the newest designs.
+  const {
+    data, isLoading, isFetching, isPlaceholderData,
+    hasNextPage, isFetchingNextPage, fetchNextPage,
+  } = useInfiniteQuery({
     queryKey: ['library', debounced],
-    queryFn: () => (debounced ? searchLibrary(debounced, 300) : getLibraryProducts(200)),
+    queryFn: ({ pageParam }): Promise<LibraryPage> =>
+      debounced
+        ? searchLibraryPage(debounced, pageParam)
+        : getLibraryProducts(200).then((items) => ({ items, nextOffset: null })),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.nextOffset ?? undefined,
     // Keep the last results on screen while the next letter is looked up, so
     // the grid narrows as she types instead of blinking to "Loading".
     placeholderData: keepPreviousData,
   });
+  const products = useMemo(() => (data ? joinPages(data.pages) : []), [data]);
+  // A new term is being looked up while the old results are still showing.
+  const refreshing = isFetching && !isFetchingNextPage;
 
   // Chips are built from what actually loaded, never hardcoded. The first
   // version listed Hand Knotted / Silk / Wool from the TypeScript interface and
@@ -102,6 +120,23 @@ export function Library() {
 
   const allShownSelected = shown.length > 0 && shown.every((p) => tray.has(p.id));
 
+  // Fetch the next page when the end of the grid comes within a screen of
+  // view. The observer is rebuilt after every page, because a page that fits
+  // without scrolling leaves the sentinel visible and no new intersection
+  // would ever fire.
+  const sentinel = useRef<HTMLDivElement>(null);
+  const pageCount = data?.pages.length ?? 0;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasNextPage || isFetchingNextPage || isPlaceholderData) return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) fetchNextPage(); },
+      { rootMargin: '0px 0px 800px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage, pageCount, shown.length]);
+
   return (
     <div className="flex min-h-screen flex-col bg-white text-neutral-900">
       <Header />
@@ -136,7 +171,7 @@ export function Library() {
 
         <div className="flex flex-wrap items-center gap-5 pt-5">
           <button
-            onClick={() => setCreating(true)}
+            onClick={() => setCreating({})}
             className="flex items-center gap-1.5 rounded-sm bg-[#2F4C69] px-3 py-1.5 text-[12.5px] font-semibold text-white"
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={3} /> New design
@@ -176,25 +211,39 @@ export function Library() {
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-[1400px] flex-1 px-7">
+      <div className="relative mx-auto w-full max-w-[1400px] flex-1 px-7">
+        <ProgressBar on={refreshing && !isLoading} />
         {isLoading ? (
-          <p className="py-16 text-center text-sm text-neutral-400">Loading designs…</p>
-        ) : !shown.length ? (
-          <p className="py-16 text-center text-sm text-neutral-400">
+          <SkeletonGrid />
+        ) : !shown.length && !hasNextPage ? (
+          <p className={'py-16 text-center text-sm text-neutral-400 transition-opacity ' + (isPlaceholderData ? 'opacity-50' : '')}>
             {debounced ? `Nothing matches “${debounced}”.` : 'Nothing here.'}
           </p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-x-[22px] gap-y-[30px] py-8">
-            {shown.map((p) => (
-              <Card
-                key={p.id}
-                product={p}
-                selected={tray.has(p.id)}
-                onToggle={() => tray.toggle(p)}
-                onOpen={() => setOpen(p)}
-              />
-            ))}
-          </div>
+          <>
+            <div
+              aria-busy={refreshing}
+              className={
+                'grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-x-[22px] gap-y-[30px] py-8 transition-opacity duration-150 ' +
+                (isPlaceholderData ? 'opacity-60' : '')
+              }
+            >
+              {shown.map((p) => (
+                <Card
+                  key={p.id}
+                  product={p}
+                  selected={tray.has(p.id)}
+                  onToggle={() => tray.toggle(p)}
+                  onOpen={() => setOpen(p)}
+                />
+              ))}
+            </div>
+            {hasNextPage && (
+              <div ref={sentinel} className="pb-10 text-center text-[12.5px] text-neutral-400">
+                {isFetchingNextPage ? 'Loading more…' : '\u00a0'}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -204,14 +253,59 @@ export function Library() {
           product={open}
           onClose={() => setOpen(null)}
           onChanged={(p) => { setOpen(p); qc.invalidateQueries({ queryKey: ['library'] }); }}
+          onCopy={(p) => {
+            setOpen(null);
+            setCreating({
+              construction: p.construction, materials: p.materials,
+              color: p.color, size: p.size, gsm: p.gsm,
+            });
+          }}
         />
       )}
       {creating && (
         <NewProduct
-          onClose={() => setCreating(false)}
-          onCreated={(p) => { setCreating(false); qc.invalidateQueries({ queryKey: ['library'] }); setOpen(p); }}
+          initial={creating}
+          onClose={() => setCreating(null)}
+          onCreated={(p) => { setCreating(null); qc.invalidateQueries({ queryKey: ['library'] }); setOpen(p); }}
+          onOpenExisting={(p) => { setCreating(null); setOpen(p); }}
         />
       )}
+    </div>
+  );
+}
+
+/** A thin sweep along the top of the results while a search is in flight. */
+function ProgressBar({ on }: { on: boolean }) {
+  return (
+    <div
+      role="progressbar"
+      aria-label="Searching"
+      aria-hidden={!on}
+      className={
+        'pointer-events-none absolute inset-x-7 top-3 h-[2px] overflow-hidden rounded-full bg-[#2F4C69]/10 transition-opacity duration-200 ' +
+        (on ? 'opacity-100' : 'opacity-0')
+      }
+    >
+      <div className="h-full w-1/3 animate-[em-sweep_1.1s_ease-in-out_infinite] rounded-full bg-[#2F4C69]" />
+    </div>
+  );
+}
+
+/** Placeholder tiles shaped like Card, for the first load when nothing is on screen yet. */
+function SkeletonGrid() {
+  return (
+    <div
+      aria-label="Loading designs"
+      className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-x-[22px] gap-y-[30px] py-8"
+    >
+      {Array.from({ length: 18 }, (_, i) => (
+        <div key={i} className="animate-pulse">
+          <div className="aspect-[4/5] rounded-sm bg-neutral-100" />
+          <div className="mt-3 h-3.5 w-3/4 rounded-sm bg-neutral-100" />
+          <div className="mt-1.5 h-2.5 w-1/2 rounded-sm bg-neutral-100" />
+          <div className="mt-2 h-2.5 w-1/3 rounded-sm bg-neutral-100" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -319,8 +413,9 @@ function Card({
   );
 }
 
-function Detail({ product, onClose, onChanged }: {
+function Detail({ product, onClose, onChanged, onCopy }: {
   product: ShowroomProduct; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
+  onCopy?: (p: ShowroomProduct) => void;
 }) {
   const tray = useSelection();
   const selected = tray.has(product.id);
@@ -444,7 +539,15 @@ function Detail({ product, onClose, onChanged }: {
               >
                 {selected ? 'Remove from selection' : 'Add to selection'}
               </button>
-
+              {onCopy && (
+                <button
+                  onClick={() => onCopy(product)}
+                  title="Start a new design with this construction, material, colour, size and GSM"
+                  className="flex items-center gap-1.5 rounded-sm border border-neutral-200 px-[18px] py-2.5 text-[13px] font-semibold hover:border-neutral-400"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy as new design
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -468,6 +571,7 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
   const [pptOpen, setPptOpen] = useState(false);
   const [asking, setAsking] = useState(false);
   const [buyer, setBuyer] = useState('');
+  const [expiryDays, setExpiryDays] = useState(0);
   const [error, setError] = useState('');
 
   if (!tray.count) {
@@ -484,9 +588,9 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
     if (!buyer.trim()) return setError('Type who this is for.');
     setBusy('link'); setError('');
     try {
-      const id = await createCatalog(tray.items, buyer, currentUserEmail() || undefined);
+      const id = await createCatalog(tray.items, buyer, currentUserEmail() || undefined, expiryDays);
       await navigator.clipboard.writeText(catalogUrl(id)).catch(() => {});
-      tray.clear(); setAsking(false); setBuyer(''); onDone(id);
+      tray.clear(); setAsking(false); setBuyer(''); setExpiryDays(0); onDone(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create the link.');
     } finally { setBusy(null); }
@@ -512,6 +616,16 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
               placeholder="Who is this for?"
               className="w-52 border-b border-neutral-300 bg-transparent pb-1 text-sm outline-none placeholder:text-neutral-400 focus:border-[#2F4C69]"
             />
+            <label className="flex items-center gap-1.5 text-[12.5px] text-neutral-500">
+              Expires
+              <select
+                value={expiryDays}
+                onChange={(e) => setExpiryDays(Number(e.target.value))}
+                className="border-b border-neutral-300 bg-transparent pb-1 text-sm text-neutral-900 outline-none focus:border-[#2F4C69]"
+              >
+                {EXPIRY_CHOICES.map((c) => <option key={c.days} value={c.days}>{c.label}</option>)}
+              </select>
+            </label>
             <button onClick={() => { setAsking(false); setError(''); }} className="px-1 text-[13px] text-neutral-500 hover:text-neutral-900">
               Cancel
             </button>

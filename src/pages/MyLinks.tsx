@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { listCatalogs, deleteCatalog, catalogUrl, type Catalog } from '../lib/catalogs';
+import {
+  listCatalogs, deleteCatalog, catalogUrl, isExpired, relativeDay, type Catalog,
+} from '../lib/catalogs';
 
 export function MyLinks() {
   const [params] = useSearchParams();
   const justMade = params.get('new');
   const qc = useQueryClient();
-  const { data: catalogs = [], isLoading } = useQuery({ queryKey: ['catalogs'], queryFn: () => listCatalogs(50) });
+  const { data: catalogs = [], isLoading } = useQuery({
+    queryKey: ['catalogs'],
+    queryFn: () => listCatalogs(50),
+    // Open counts change while she is elsewhere; refresh on coming back.
+    staleTime: 0,
+  });
 
   return (
     <div className="min-h-screen bg-white text-neutral-900">
@@ -57,9 +64,14 @@ function Row({ catalog, onDeleted }: { catalog: Catalog; onDeleted: () => void }
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const url = catalogUrl(catalog.id);
-  const when = catalog.createdAt
-    ? new Date(catalog.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-    : '';
+  const day = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const when = catalog.createdAt ? day(catalog.createdAt) : '';
+  const expired = isExpired(catalog);
+  const opened = !catalog.views
+    ? 'Not opened yet'
+    : `Opened ${catalog.views === 1 ? 'once' : `${catalog.views} times`}` +
+      (catalog.lastViewedAt ? `, last ${relativeDay(catalog.lastViewedAt)}` : '');
 
   async function copy() {
     await navigator.clipboard.writeText(url).catch(() => {});
@@ -70,11 +82,20 @@ function Row({ catalog, onDeleted }: { catalog: Catalog; onDeleted: () => void }
   return (
     <li className="flex flex-wrap items-center gap-3 py-4">
       <div className="min-w-[180px] flex-1">
-        <div className="text-sm font-semibold">{catalog.buyer || 'Untitled'}</div>
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          {catalog.buyer || 'Untitled'}
+          {expired && (
+            <span className="rounded-sm bg-[#98671A]/10 px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[#98671A]">
+              Expired
+            </span>
+          )}
+        </div>
         <div className="text-[12px] text-neutral-400">
           {catalog.items.length} {catalog.items.length === 1 ? 'rug' : 'rugs'}
           {when ? ` · ${when}` : ''}
+          {catalog.expiresAt ? ` · ${expired ? 'Expired' : 'Expires'} ${day(catalog.expiresAt)}` : ''}
         </div>
+        <div className={'text-[12px] ' + (catalog.views ? 'text-neutral-500' : 'text-neutral-400')}>{opened}</div>
       </div>
       <a href={url} target="_blank" rel="noreferrer" className="text-[13px] text-neutral-500 hover:text-neutral-900">
         Open

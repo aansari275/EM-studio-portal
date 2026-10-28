@@ -1,13 +1,16 @@
+import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { getCatalog } from '../lib/catalogs';
+import { getCatalog, isExpired, recordCatalogView } from '../lib/catalogs';
 import { thumb } from '../lib/img';
 
 /**
- * The page a buyer opens. Public, no sign-in, no tracking.
+ * The page a buyer opens. Public, no sign-in.
  *
  * Reads only the frozen catalog document, never the product collection, so a
  * shared link cannot leak the wider library and cannot change after sending.
+ * The only thing written back is an open count and when it was last opened,
+ * so the studio can see a link was looked at. Nothing about the buyer is kept.
  */
 export function CatalogView() {
   const { id = '' } = useParams();
@@ -16,6 +19,12 @@ export function CatalogView() {
     queryFn: () => getCatalog(id),
     retry: false,
   });
+  const expired = !!data && isExpired(data);
+
+  useEffect(() => {
+    // An expired link is not a view of the rugs, so it is not counted.
+    if (data && !expired) recordCatalogView(data.id).catch(() => {});
+  }, [data, expired]);
 
   if (isLoading) {
     return <Centered>Loading…</Centered>;
@@ -26,6 +35,17 @@ export function CatalogView() {
         <p className="font-serif text-2xl text-neutral-900">Eastern Mills</p>
         <p className="mt-2 text-sm text-neutral-500">
           This selection is no longer available. Please ask for a fresh link.
+        </p>
+      </Centered>
+    );
+  }
+
+  if (expired) {
+    return (
+      <Centered>
+        <p className="font-serif text-2xl text-neutral-900">Eastern Mills</p>
+        <p className="mt-2 text-sm text-neutral-500">
+          This link has expired. Please ask Eastern Mills for a fresh one.
         </p>
       </Centered>
     );

@@ -9,6 +9,12 @@
  * function and refreshed every minute, and only the matched documents are
  * fetched in full. The Library pings ?warm=1 on load so the first real search
  * does not pay the cold start.
+ *
+ * Paged: `?q=&n=&offset=` returns `{ items, total, nextOffset }`. A broad term
+ * like "80" matches thousands of records, and fetching 300 full documents
+ * before showing any was the slow part. The library now asks for 60 at a time
+ * and fetches the next page as she scrolls. Scanning the slim index for the
+ * total is cheap; only the page itself goes through batchGet.
  */
 const BASE = 'https://firestore.googleapis.com/v1/projects/easternmillscom/databases/(default)/documents';
 const COLLECTION = 'showroom_products';
@@ -106,14 +112,19 @@ export default async (req: Request) => {
     }
     const q = (url.searchParams.get('q') || '').trim().toLowerCase();
     const n = Math.min(Number(url.searchParams.get('n')) || 300, 500);
-    if (!q) return json({ items: [] });
+    const offset = Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0));
+    if (!q) return json({ items: [], total: 0, nextOffset: null });
     const rows = await getIndex();
-    const ids: string[] = [];
-    for (const r of rows) {
-      if (r.text.includes(q)) ids.push(r.id);
-      if (ids.length >= n) break;
-    }
-    return json({ items: await fetchDocs(ids) });
+    // Every match, in index order (newest first), so offsets are stable
+    // between pages as long as the index has not been rebuilt in between.
+    const matched: string[] = [];
+    for (const r of rows) if (r.text.includes(q)) matched.push(r.id);
+    const end = offset + n;
+    return json({
+      items: await fetchDocs(matched.slice(offset, end)),
+      total: matched.length,
+      nextOffset: end < matched.length ? end : null,
+    });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'search failed' }, 500);
   }

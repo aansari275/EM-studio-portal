@@ -62,3 +62,8 @@ export function watchAuth(cb: (user: User | null) => void) {
 export function currentUserEmail(): string | null {
   return auth.currentUser?.email ?? null;
 }
+
+/** Firebase uid of the signed-in studio user, or null. Keys per-person settings. */
+export function currentUserUid(): string | null {
+  return auth.currentUser?.uid ?? null;
+}

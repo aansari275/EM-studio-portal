@@ -718,49 +718,79 @@ function loadAllShowroomDocs(): Promise<any[]> {
   return docs;
 }
 
-export async function searchShowroomProducts(searchTerm: string, limitCount: number = 200): Promise<ShowroomProduct[]> {
+export interface ShowroomPage {
+  items: ShowroomProduct[];
+  total: number;
+  /** Where the next page starts, or null when this was the last one. */
+  nextOffset: number | null;
+}
+
+/** Every field the search matches on, for the local fallback scan. */
+function matchesLocally(d: any, id: string, term: string): boolean {
+  return (
+    d.displayName?.toLowerCase().includes(term) ||
+    d.styleNumber?.toLowerCase().includes(term) ||
+    d.baseStyleNumber?.toLowerCase().includes(term) ||
+    d.productId?.toLowerCase().includes(term) ||
+    d.construction?.toLowerCase().includes(term) ||
+    d.color?.toLowerCase().includes(term) ||
+    d.category?.toLowerCase().includes(term) ||
+    d.materials?.toLowerCase().includes(term) ||
+    d.size?.toLowerCase().includes(term) ||
+    d.gsm?.toLowerCase().includes(term) ||
+    id.toLowerCase().includes(term)
+  );
+}
+
+/**
+ * One page of a showroom search, newest first.
+ *
+ * Server-side first: the function keeps a slim index of every record, so the
+ * browser only receives the page it asked for. The local scan below stays as a
+ * fallback for `vite dev`, where Netlify functions are not running, and slices
+ * the same way so paging behaves identically there.
+ */
+export async function searchShowroomPage(
+  searchTerm: string,
+  offset = 0,
+  pageSize = 60
+): Promise<ShowroomPage> {
   try {
-    // Server-side first: the function keeps a slim index of every record, so
-    // the browser only receives the matches. The local scan below stays as a
-    // fallback for `vite dev`, where Netlify functions are not running.
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(searchTerm)}&n=${limitCount}`);
-      if (res.ok) {
-        const { items } = await res.json();
-        if (Array.isArray(items)) return items.map((d: any) => mapShowroomData(d.id, d));
+    const res = await fetch(
+      `/api/search?q=${encodeURIComponent(searchTerm)}&n=${pageSize}&offset=${offset}`
+    );
+    if (res.ok) {
+      const body = await res.json();
+      if (Array.isArray(body.items)) {
+        const items = body.items.map((d: any) => mapShowroomData(d.id, d));
+        // An older deployed function answers without paging fields. Treat that
+        // as a single page rather than asking again for the same records.
+        const total = typeof body.total === 'number' ? body.total : offset + items.length;
+        const nextOffset = typeof body.nextOffset === 'number' ? body.nextOffset : null;
+        return { items, total, nextOffset };
       }
-    } catch {
-      /* fall through to the local scan */
     }
-    const allDocs = await loadAllShowroomDocs();
-
+  } catch {
+    /* fall through to the local scan */
+  }
+  try {
     const term = searchTerm.toLowerCase();
-    const filtered = allDocs
-      .filter(doc => {
-        const data = doc.data();
-        // Search across all relevant fields
-        return (
-          data.displayName?.toLowerCase().includes(term) ||
-          data.styleNumber?.toLowerCase().includes(term) ||
-          data.baseStyleNumber?.toLowerCase().includes(term) ||
-          data.productId?.toLowerCase().includes(term) ||
-          data.construction?.toLowerCase().includes(term) ||
-          data.color?.toLowerCase().includes(term) ||
-          data.category?.toLowerCase().includes(term) ||
-          data.materials?.toLowerCase().includes(term) ||
-          data.size?.toLowerCase().includes(term) ||
-          data.gsm?.toLowerCase().includes(term) ||
-          doc.id?.toLowerCase().includes(term)
-        );
-      })
-      .slice(0, limitCount)
-      .map(doc => mapShowroomDoc(doc));
-
-    return filtered;
+    const matched = (await loadAllShowroomDocs()).filter((d) => matchesLocally(d.data(), d.id, term));
+    const end = offset + pageSize;
+    return {
+      items: matched.slice(offset, end).map((d) => mapShowroomDoc(d)),
+      total: matched.length,
+      nextOffset: end < matched.length ? end : null,
+    };
   } catch (error) {
     console.error('Error searching showroom products:', error);
-    return [];
+    return { items: [], total: 0, nextOffset: null };
   }
+}
+
+/** Unpaged search, kept for the older Rug Gallery page. */
+export async function searchShowroomProducts(searchTerm: string, limitCount: number = 200): Promise<ShowroomProduct[]> {
+  return (await searchShowroomPage(searchTerm, 0, limitCount)).items;
 }
 
 /**
@@ -1510,6 +1540,56 @@ export async function findProductByStyle(styleNumber: string): Promise<ShowroomP
     query(collection(db, SHOWROOM_COLLECTION), where('styleNumber', '==', styleNumber.trim()), limit(1))
   );
   return snap.empty ? null : mapShowroomDoc(snap.docs[0]);
+}
+
+/**
+ * Style numbers are typed by hand, so EM-26-MA-7420, em 26 ma 7420 and
+ * EM.26.MA.7420 are the same design. Compare on letters and digits only.
+ */
+export function styleKey(styleNumber: string): string {
+  return (styleNumber || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * An existing showroom product whose style number matches this one once case,
+ * spaces, dashes and dots are ignored, or null.
+ *
+ * Two lookups, because neither alone is enough: the equality query only finds
+ * the exact spelling, and the search index finds other spellings but is not
+ * running under `vite dev`. The search is narrowed by the longest run of
+ * digits ("7420", which also survives "EM26MA7420" typed without separators),
+ * then compared on the normalised key.
+ */
+export async function findDuplicateStyle(styleNumber: string): Promise<ShowroomProduct | null> {
+  const typed = styleNumber.trim();
+  const key = styleKey(typed);
+  if (key.length < 3) return null;
+  const same = (p: ShowroomProduct) => styleKey(p.styleNumber) === key;
+
+  const exact = async () => {
+    const [bySlug, byField] = await Promise.all([
+      getDoc(doc(db, SHOWROOM_COLLECTION, styleSlug(typed))),
+      getDocs(query(collection(db, SHOWROOM_COLLECTION), where('styleNumber', '==', typed), limit(1))),
+    ]);
+    if (bySlug.exists()) return mapShowroomDoc(bySlug);
+    return byField.empty ? null : mapShowroomDoc(byField.docs[0]);
+  };
+
+  const fuzzy = async () => {
+    const longest = (re: RegExp) => (typed.match(re) || []).sort((a, b) => b.length - a.length)[0] || '';
+    const digits = longest(/\d+/g);
+    const token = digits.length >= 3 ? digits : longest(/[A-Za-z0-9]+/g);
+    if (token.length < 3) return null;
+    const res = await fetch(`/api/search?q=${encodeURIComponent(token.toLowerCase())}&n=200`);
+    if (!res.ok) return null;
+    const { items } = await res.json();
+    if (!Array.isArray(items)) return null;
+    const hit = items.map((d: any) => mapShowroomData(d.id, d)).find(same);
+    return hit || null;
+  };
+
+  const [a, b] = await Promise.all([exact().catch(() => null), fuzzy().catch(() => null)]);
+  return a || b;
 }
 
 export async function createShowroomProduct(input: NewProductInput): Promise<ShowroomProduct> {
