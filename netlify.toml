@@ -9,7 +9,7 @@
   status = 200
 
 [images]
-  remote_images = ["https://firebasestorage\\.googleapis\\.com/.*"]
+  remote_images = ["https://firebasestorage\\.googleapis\\.com/.*", "https://storage\\.googleapis\\.com/easternmillscom\\.firebasestorage\\.app/.*"]
 
 [functions]
   node_bundler = "esbuild"
