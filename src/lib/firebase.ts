@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { fixStorageUrl } from './img';
 import {
   getFirestore,
   collection,
@@ -617,6 +618,11 @@ export interface ShowroomProduct {
   // Source tracking
   source?: string; // e.g., "Heimtextil 2026"
   tags?: string[]; // e.g., ["Heimtextil 2026"]
+  /** The studio picked the main photo by hand, so firebaseUrl is the hero
+   *  even when another file happens to be named main.* */
+  heroPinned?: boolean;
+  /** Soft deleted from the studio. Hidden from the library, kept in the data. */
+  deleted?: boolean;
 }
 
 export interface DesignGroup {
@@ -803,7 +809,7 @@ function mapShowroomDoc(docSnap: any): ShowroomProduct {
 /** Same mapping for a plain object, as returned by /api/search. */
 export function mapShowroomData(id: string, data: any): ShowroomProduct {
 
-  const mainImage = data.firebaseUrl || data.imageUrl || '';
+  const mainImage = fixStorageUrl(data.firebaseUrl || data.imageUrl || '');
   // Support both field names: additionalImages (showroom) and additionalImageUrls (heimtextil)
   const additionalImages = data.additionalImages || data.additionalImageUrls || [];
 
@@ -825,7 +831,7 @@ export function mapShowroomData(id: string, data: any): ShowroomProduct {
     styleNumber: data.styleNumber || data.displayName || '',
     displayName: data.displayName || data.styleNumber || '',
     firebaseUrl: mainImage,
-    additionalImages: Array.isArray(additionalImages) ? additionalImages : [],
+    additionalImages: Array.isArray(additionalImages) ? additionalImages.map(fixStorageUrl) : [],
     color: data.color || '',
     materials: materialsStr,
     construction: data.construction || '',
@@ -835,6 +841,8 @@ export function mapShowroomData(id: string, data: any): ShowroomProduct {
     createdAt: timestampToString(data.createdAt),
     source: data.source || '',
     tags: data.tags || [],
+    heroPinned: !!data.heroPinned,
+    deleted: !!data.deletedAt,
   };
 }
 

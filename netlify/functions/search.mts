@@ -19,7 +19,7 @@
 const BASE = 'https://firestore.googleapis.com/v1/projects/easternmillscom/databases/(default)/documents';
 const COLLECTION = 'showroom_products';
 const FIELDS = ['styleNumber', 'displayName', 'baseStyleNumber', 'productId',
-  'color', 'materials', 'construction', 'size', 'gsm', 'createdAt'];
+  'color', 'materials', 'construction', 'size', 'gsm', 'createdAt', 'deletedAt'];
 const TTL_MS = 60 * 1000;
 
 type Row = { id: string; text: string; at: string };
@@ -60,7 +60,9 @@ async function buildIndex(): Promise<Row[]> {
     if (!r.document) continue;
     const id = r.document.name.split('/').pop();
     const d = decodeFields(r.document.fields || {});
-    const text = [id, ...FIELDS.filter((k) => k !== 'createdAt').map((k) => flat(d[k]))]
+    // Deleted from the studio (soft delete, see src/lib/productEdit.ts).
+    if (d.deletedAt) continue;
+    const text = [id, ...FIELDS.filter((k) => k !== 'createdAt' && k !== 'deletedAt').map((k) => flat(d[k]))]
       .join(' ').toLowerCase();
     out.push({ id, text, at: d.createdAt || '' });
   }

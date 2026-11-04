@@ -11,6 +11,7 @@
  * can fit the rug inside its slot without stretching it, and the deck size is
  * known before anything is downloaded.
  */
+import { fixStorageUrl } from './img';
 
 export type DeckImage = { data: string; w: number; h: number; bytes: number };
 export type DeckImages = Map<string, DeckImage>;
@@ -77,7 +78,8 @@ async function fetchBlob(url: string): Promise<Blob> {
   return res.blob();
 }
 
-async function loadOne(url: string, quality: Px): Promise<DeckImage> {
+async function loadOne(raw: string, quality: Px): Promise<DeckImage> {
+  const url = fixStorageUrl(raw);
   let blob: Blob;
   if (import.meta.env.DEV) {
     blob = await resizeLocally(await fetchBlob(url), quality);

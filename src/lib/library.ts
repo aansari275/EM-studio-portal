@@ -19,7 +19,8 @@ import {
  * styles the showroom set does not have at all.
  *
  * So they are complementary, not competing, and this module unions them.
- * Neither collection is written to — other apps read both.
+ * Only the studio's own Edit and Delete write to them (productEdit.ts), and
+ * delete is soft: a `deletedAt` field, filtered out here.
  */
 const EM = 'em_products';
 
@@ -108,6 +109,7 @@ function mapEm(id: string, d: any): ShowroomProduct {
     gsm: tidy(d.gsm),
     source: 'ppt_archive',
     tags: [],
+    deleted: !!d.deletedAt,
   };
 }
 
@@ -155,6 +157,7 @@ function dedupe(items: ShowroomProduct[]): ShowroomProduct[] {
   const seen = new Set<string>();
   const out: ShowroomProduct[] = [];
   for (const p of items) {
+    if (p.deleted) continue;
     const key = `${normStyle(p.styleNumber)}|${(p.color || '').toUpperCase().trim()}`;
     if (seen.has(key)) continue;
     seen.add(key);

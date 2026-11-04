@@ -8,14 +8,32 @@
  *
  * The CDN endpoint only exists on the deployed site, so dev serves originals.
  */
-export function thumb(url: string | undefined, width = 700): string {
-  if (!url) return '';
+export function thumb(raw: string | undefined, width = 700): string {
+  if (!raw) return '';
+  const url = fixStorageUrl(raw);
   if (import.meta.env.DEV) return url;
   if (!/^https?:\/\//.test(url)) return url;
   return `/.netlify/images?url=${encodeURIComponent(url)}&w=${width}&fm=webp&q=72`;
 }
 
-type HasImages = { firebaseUrl?: string; additionalImages?: string[] };
+const BUCKET = 'easternmillscom.firebasestorage.app';
+const PUBLIC_HOST = `https://storage.googleapis.com/${BUCKET}/`;
+
+/**
+ * The Heimtextil import stored plain public bucket links
+ * (storage.googleapis.com/<bucket>/heimtextil/...). Those objects are not
+ * public, so every one answers 403 and the card shows a broken image, while
+ * the very same file loads through the Firebase endpoint under the storage
+ * rules. Checked 4 Nov 2026 on EM-25-FA-8844: 403 public, 200 Firebase.
+ * Rewritten on read rather than in the data, so other apps are untouched.
+ */
+export function fixStorageUrl(url: string): string {
+  if (!url || !url.startsWith(PUBLIC_HOST)) return url;
+  const path = decodeURIComponent(url.slice(PUBLIC_HOST.length).split('?')[0]);
+  return `https://firebasestorage.googleapis.com/v0/b/${BUCKET}/o/${encodeURIComponent(path)}?alt=media`;
+}
+
+type HasImages = { firebaseUrl?: string; additionalImages?: string[]; heroPinned?: boolean };
 
 /**
  * Which photo is the hero.
@@ -46,6 +64,7 @@ export function allImages(p: HasImages): string[] {
 
 /** The full-rug shot when we can identify it, else whatever was set as primary. */
 export function heroImage(p: HasImages): string {
+  if (p.heroPinned && p.firebaseUrl) return p.firebaseUrl;
   const all = allImages(p);
   return all.find(isMain) || p.firebaseUrl || all[0] || '';
 }

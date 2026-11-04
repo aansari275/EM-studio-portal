@@ -217,7 +217,7 @@ export function NewProduct({
   );
 }
 
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+export function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
     <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-400">
       {children}{required && <span className="ml-1 text-[#98671A]">required</span>}
@@ -233,7 +233,7 @@ const lineCls =
  * A dropdown whose last entry is "+ Add new…". Picking it swaps the select for
  * a text box; Enter or leaving the box keeps the value and saves it as a choice.
  */
-function Choice({
+export function Choice({
   label, value, onChange, options, onAdd, ariaLabel,
 }: {
   label?: string; value: string; onChange: (v: string) => void;
@@ -286,7 +286,7 @@ function Choice({
   );
 }
 
-function Field({
+export function Field({
   label, hint, required, value, onChange, autoFocus, onEnter,
 }: {
   label: string; hint?: string; required?: boolean; value: string;

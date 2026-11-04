@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { Search, Check, X, Plus, Copy } from 'lucide-react';
+import { Search, Check, X, Plus, Copy, Pencil, Trash2 } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import {
   getLibraryProducts,
@@ -19,6 +19,8 @@ import { thumb, heroImage, orderedImages } from '../lib/img';
 import { canonicalConstruction } from '../lib/library';
 import { NewProduct, type NewProductInitial } from '../components/NewProduct';
 import { PhotoDrop } from '../components/PhotoDrop';
+import { EditProduct } from '../components/EditProduct';
+import { deleteProduct, restoreProduct } from '../lib/productEdit';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -47,6 +49,9 @@ export function Library() {
   const [open, setOpen] = useState<ShowroomProduct | null>(null);
   // null: closed. An object: open, prefilled from it (empty for a fresh design).
   const [creating, setCreating] = useState<NewProductInitial | null>(null);
+  const [editing, setEditing] = useState<ShowroomProduct | null>(null);
+  // The last design deleted, offered back for a few seconds.
+  const [undo, setUndo] = useState<ShowroomProduct | null>(null);
   const tray = useSelection();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -253,6 +258,14 @@ export function Library() {
           product={open}
           onClose={() => setOpen(null)}
           onChanged={(p) => { setOpen(p); qc.invalidateQueries({ queryKey: ['library'] }); }}
+          onEdit={(p) => setEditing(p)}
+          onDeleted={(p) => {
+            setOpen(null);
+            if (tray.has(p.id)) tray.toggle(p);
+            setUndo(p);
+            qc.invalidateQueries({ queryKey: ['library'] });
+            qc.invalidateQueries({ queryKey: ['variants'] });
+          }}
           onCopy={(p) => {
             setOpen(null);
             setCreating({
@@ -260,6 +273,25 @@ export function Library() {
               color: p.color, size: p.size, gsm: p.gsm,
             });
           }}
+        />
+      )}
+      {editing && (
+        <EditProduct
+          product={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(p) => {
+            setEditing(null);
+            setOpen(p);
+            qc.invalidateQueries({ queryKey: ['library'] });
+            qc.invalidateQueries({ queryKey: ['variants'] });
+          }}
+        />
+      )}
+      {undo && (
+        <UndoToast
+          product={undo}
+          onDone={() => setUndo(null)}
+          onRestored={() => { setUndo(null); qc.invalidateQueries({ queryKey: ['library'] }); }}
         />
       )}
       {creating && (
@@ -413,13 +445,32 @@ function Card({
   );
 }
 
-function Detail({ product, onClose, onChanged, onCopy }: {
+function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted }: {
   product: ShowroomProduct; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
   onCopy?: (p: ShowroomProduct) => void;
+  onEdit?: (p: ShowroomProduct) => void;
+  onDeleted?: (p: ShowroomProduct) => void;
 }) {
   const tray = useSelection();
   const selected = tray.has(product.id);
   const [shot, setShot] = useState(heroImage(product));
+  // Follow the hero when the product is replaced after an edit.
+  useEffect(() => { setShot(heroImage(product)); }, [product]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  async function remove() {
+    setDeleting(true); setDeleteError('');
+    try {
+      await deleteProduct(product);
+      onDeleted?.(product);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Could not delete it.');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const { data: variants = [] } = useQuery({
     queryKey: ['variants', product.baseStyleNumber],
@@ -549,6 +600,33 @@ function Detail({ product, onClose, onChanged, onCopy }: {
                 </button>
               )}
             </div>
+
+            <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-neutral-100 pt-4">
+              {onEdit && (
+                <button onClick={() => onEdit(product)}
+                  className="flex items-center gap-1.5 text-[13px] font-semibold text-[#2F4C69] hover:underline">
+                  <Pencil className="h-3.5 w-3.5" /> Edit design
+                </button>
+              )}
+              {onDeleted && !confirmDelete && (
+                <button onClick={() => setConfirmDelete(true)}
+                  className="flex items-center gap-1.5 text-[13px] font-semibold text-red-700 hover:underline">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </button>
+              )}
+              {confirmDelete && (
+                <div role="alert" className="flex w-full flex-wrap items-center gap-3 border-l-2 border-red-600 bg-red-50 px-3 py-2 text-[12.5px] text-red-800">
+                  <span className="flex-1">Remove {product.styleNumber} from the library? Buyer links already sent keep it.</span>
+                  <button onClick={() => setConfirmDelete(false)} disabled={deleting}
+                    className="text-neutral-600 hover:text-neutral-900">Cancel</button>
+                  <button onClick={remove} disabled={deleting}
+                    className="rounded-sm bg-red-700 px-3 py-1.5 font-semibold text-white disabled:opacity-60">
+                    {deleting ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
+              )}
+              {deleteError && <p className="w-full text-[12.5px] text-red-600">{deleteError}</p>}
+            </div>
           </div>
         </div>
       </div>
@@ -649,6 +727,35 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
       </div>
       {error && <p className="px-7 pb-3 text-[12.5px] text-red-600">{error}</p>}
       {pptOpen && <Suspense fallback={null}><PptDialog products={tray.items} onClose={() => setPptOpen(false)} /></Suspense>}
+    </div>
+  );
+}
+
+/** "Deleted, Undo" for a few seconds after a delete. */
+function UndoToast({ product, onDone, onRestored }: {
+  product: ShowroomProduct; onDone: () => void; onRestored: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (busy || error) return;
+    const t = setTimeout(onDone, 8000);
+    return () => clearTimeout(t);
+  }, [product, busy, error, onDone]);
+
+  async function restore() {
+    setBusy(true); setError('');
+    try { await restoreProduct(product); onRestored(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not restore it.'); setBusy(false); }
+  }
+
+  return (
+    <div role="status" className="fixed bottom-24 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-4 rounded-md bg-neutral-900 px-5 py-3 text-[13px] text-white shadow-lg">
+      <span>{error || `${product.styleNumber} deleted.`}</span>
+      <button onClick={restore} disabled={busy} className="font-semibold text-[#9cc0e3] hover:underline disabled:opacity-60">
+        {busy ? 'Restoring…' : 'Undo'}
+      </button>
+      <button onClick={onDone} aria-label="Dismiss" className="text-neutral-400 hover:text-white"><X className="h-4 w-4" /></button>
     </div>
   );
 }
