@@ -56,6 +56,14 @@ export function Library() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
+  function afterDelete(p: ShowroomProduct) {
+    setOpen(null);
+    if (tray.has(p.id)) tray.toggle(p);
+    setUndo(p);
+    qc.invalidateQueries({ queryKey: ['library'] });
+    qc.invalidateQueries({ queryKey: ['variants'] });
+  }
+
   useEffect(() => {
     const t = setTimeout(() => setDebounced(term.trim()), 150);
     return () => clearTimeout(t);
@@ -240,6 +248,8 @@ export function Library() {
                   selected={tray.has(p.id)}
                   onToggle={() => tray.toggle(p)}
                   onOpen={() => setOpen(p)}
+                  onEdit={() => setEditing(p)}
+                  onDelete={async () => { await deleteProduct(p); afterDelete(p); }}
                 />
               ))}
             </div>
@@ -259,13 +269,7 @@ export function Library() {
           onClose={() => setOpen(null)}
           onChanged={(p) => { setOpen(p); qc.invalidateQueries({ queryKey: ['library'] }); }}
           onEdit={(p) => setEditing(p)}
-          onDeleted={(p) => {
-            setOpen(null);
-            if (tray.has(p.id)) tray.toggle(p);
-            setUndo(p);
-            qc.invalidateQueries({ queryKey: ['library'] });
-            qc.invalidateQueries({ queryKey: ['variants'] });
-          }}
+          onDeleted={afterDelete}
           onCopy={(p) => {
             setOpen(null);
             setCreating({
@@ -281,7 +285,8 @@ export function Library() {
           onClose={() => setEditing(null)}
           onSaved={(p) => {
             setEditing(null);
-            setOpen(p);
+            // Reopen the detail only if the edit started there.
+            if (open) setOpen(p);
             qc.invalidateQueries({ queryKey: ['library'] });
             qc.invalidateQueries({ queryKey: ['variants'] });
           }}
@@ -379,11 +384,24 @@ function Header() {
 }
 
 function Card({
-  product, selected, onToggle, onOpen,
+  product, selected, onToggle, onOpen, onEdit, onDelete,
 }: {
   product: ShowroomProduct; selected: boolean; onToggle: () => void; onOpen: () => void;
+  onEdit: () => void; onDelete: () => Promise<void>;
 }) {
   const hasPhoto = !!product.firebaseUrl;
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function remove() {
+    setDeleting(true); setFailed(false);
+    try { await onDelete(); }
+    catch { setFailed(true); setDeleting(false); }
+  }
+
+  const iconCls =
+    'grid h-7 w-7 place-items-center rounded bg-white/95 shadow-[0_1px_2px_rgba(0,0,0,0.15)] transition-colors';
   return (
     <div className="group">
       <div
@@ -420,6 +438,39 @@ function Card({
         >
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
         </button>
+
+        {/* Always visible on touch screens, on hover with a mouse. */}
+        <div className="absolute right-2 top-2 flex gap-1.5 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
+          <button onClick={(e) => { e.stopPropagation(); onEdit(); }}
+            aria-label={`Edit ${product.displayName}`} title="Edit"
+            className={iconCls + ' text-neutral-600 hover:text-[#2F4C69]'}>
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+            aria-label={`Delete ${product.displayName}`} title="Delete"
+            className={iconCls + ' text-neutral-600 hover:text-red-700'}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {confirming && (
+          <div role="alertdialog" aria-label={`Delete ${product.displayName}?`}
+            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/90 p-3 text-center backdrop-blur-[1px]">
+            <span className="text-[13px] font-semibold text-neutral-900">
+              {failed ? 'Could not delete it.' : 'Delete this design?'}
+            </span>
+            <div className="flex gap-2">
+              <button onClick={() => { setConfirming(false); setFailed(false); }} disabled={deleting}
+                className="rounded-sm border border-neutral-300 bg-white px-3 py-1.5 text-[12.5px] hover:border-neutral-500">
+                Cancel
+              </button>
+              <button onClick={remove} disabled={deleting} autoFocus
+                className="rounded-sm bg-red-700 px-3 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-60">
+                {deleting ? 'Deleting…' : failed ? 'Try again' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="pt-3">
