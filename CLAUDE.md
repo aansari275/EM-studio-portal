@@ -270,3 +270,9 @@ netlify deploy --prod
 - Layouts: one rug per slide (optionally with photos past the fourth on 8-up slides after it), or eight rugs per slide (colourway grid from slides 7-9 of the Zara deck, caption = colour + size, falling back to style no.).
 - Some stored `.jpg` files are really HTML (e.g. `products/EM-206/image-5.jpg`). They are skipped and the slot stays empty, the deck still builds.
 - The server-side generator still calls `buildPptx(products, title)` with no options, so it keeps the old URL behaviour.
+
+## Edit, delete and the 403 Heimtextil photos (4 Nov 2026)
+
+- **Heimtextil photos were blank.** Those `showroom_products` docs store `imageUrl` / `additionalImageUrls` as public `storage.googleapis.com/<bucket>/heimtextil/...` links, and those objects are not public: 403. The same path loads through the Firebase endpoint. `fixStorageUrl()` in `src/lib/img.ts` rewrites on read: in `mapShowroomData`, inside `thumb()` (so old frozen buyer links heal) and in the deck loader. Data untouched.
+- **Edit design** (`components/EditProduct.tsx`, `lib/productEdit.ts`): number, specs, photos (remove, make main, add). Works on `showroom_products` and on archive `em_products` (`em:` ids; construction is stored in `category` there). The doc id never changes. Removed photos are unlinked, files stay in Storage. Saving sets `heroPinned: true` so `heroImage()` trusts `firebaseUrl` over any `main.*`.
+- **Delete is soft**: `deletedAt` + `deletedBy`, Undo toast restores. Filtered in `library.ts` `dedupe()` and in `netlify/functions/search.mts`. Firestore delete rules were not touched. The MCP connector and server deck do not filter `deletedAt` yet.
