@@ -21,10 +21,13 @@ export function PhotoPicker({
   slots,
   onChange,
   disabled,
+  hasMain,
 }: {
   slots: Slot[];
   onChange: (s: Slot[]) => void;
   disabled?: boolean;
+  /** The design already has a main photo, so none of these new ones is it. */
+  hasMain?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [urls, setUrls] = useState<string[]>([]);
@@ -96,7 +99,7 @@ export function PhotoPicker({
                   Check this
                 </span>
               )}
-              {i === 0 && !s.working && (
+              {i === 0 && !hasMain && !s.working && (
                 <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9.5px] font-semibold uppercase tracking-wide text-white">
                   Main
                 </span>

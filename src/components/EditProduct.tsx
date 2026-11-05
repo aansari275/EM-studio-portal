@@ -172,7 +172,7 @@ export function EditProduct({
               </div>
             )}
             <div className="mt-3">
-              <PhotoPicker slots={slots} onChange={setSlots} disabled={!!busy} />
+              <PhotoPicker slots={slots} onChange={setSlots} disabled={!!busy} hasMain={photos.length > 0} />
             </div>
           </div>
 
