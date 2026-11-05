@@ -276,3 +276,9 @@ netlify deploy --prod
 - **Heimtextil photos were blank.** Those `showroom_products` docs store `imageUrl` / `additionalImageUrls` as public `storage.googleapis.com/<bucket>/heimtextil/...` links, and those objects are not public: 403. The same path loads through the Firebase endpoint. `fixStorageUrl()` in `src/lib/img.ts` rewrites on read: in `mapShowroomData`, inside `thumb()` (so old frozen buyer links heal) and in the deck loader. Data untouched.
 - **Edit design** (`components/EditProduct.tsx`, `lib/productEdit.ts`): number, specs, photos (remove, make main, add). Works on `showroom_products` and on archive `em_products` (`em:` ids; construction is stored in `category` there). The doc id never changes. Removed photos are unlinked, files stay in Storage. Saving sets `heroPinned: true` so `heroImage()` trusts `firebaseUrl` over any `main.*`.
 - **Delete is soft**: `deletedAt` + `deletedBy`, Undo toast restores. Filtered in `library.ts` `dedupe()` and in `netlify/functions/search.mts`. Firestore delete rules were not touched. The MCP connector and server deck do not filter `deletedAt` yet.
+
+## Colourways (5 Nov 2026)
+
+- A colourway is its own `showroom_products` doc: `styleNumber` = design + colour slug (`EM-17-AM-418` + "Grey Yellow" -> `EM-17-AM-418-GREY-YELLOW`, `variantStyleNumber()` in `firebase.ts`), `baseStyleNumber` set explicitly to the design, `color` = the name she typed, `displayName` = `<design> · <colour>`. Same shape as the older showroom variants, so `getLibraryVariants()` groups it with no other change.
+- UI says **colourway**, never "variant" (Abdul's wording). Detail panel: big dashed **Add colourway** card, then colourway photo tiles (click opens, tick adds to selection). `NewProduct` takes `variantOf` for this mode; typing an existing number in New design offers "Add a colourway to it".
+- A colour already on the design is blocked (matched on `styleKey`), with a link to open the existing one.

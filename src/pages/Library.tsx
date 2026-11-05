@@ -49,6 +49,8 @@ export function Library() {
   const [open, setOpen] = useState<ShowroomProduct | null>(null);
   // null: closed. An object: open, prefilled from it (empty for a fresh design).
   const [creating, setCreating] = useState<NewProductInitial | null>(null);
+  // The design a new colour variant is being added to.
+  const [addingVariant, setAddingVariant] = useState<ShowroomProduct | null>(null);
   const [editing, setEditing] = useState<ShowroomProduct | null>(null);
   // The last design deleted, offered back for a few seconds.
   const [undo, setUndo] = useState<ShowroomProduct | null>(null);
@@ -270,6 +272,8 @@ export function Library() {
           onChanged={(p) => { setOpen(p); qc.invalidateQueries({ queryKey: ['library'] }); }}
           onEdit={(p) => setEditing(p)}
           onDeleted={afterDelete}
+          onOpenVariant={(p) => setOpen(p)}
+          onAddVariant={(p) => { setOpen(null); setAddingVariant(p); }}
           onCopy={(p) => {
             setOpen(null);
             setCreating({
@@ -303,8 +307,26 @@ export function Library() {
         <NewProduct
           initial={creating}
           onClose={() => setCreating(null)}
-          onCreated={(p) => { setCreating(null); qc.invalidateQueries({ queryKey: ['library'] }); setOpen(p); }}
+          onCreated={(p) => {
+            setCreating(null);
+            qc.invalidateQueries({ queryKey: ['library'] });
+            qc.invalidateQueries({ queryKey: ['variants'] });
+            setOpen(p);
+          }}
           onOpenExisting={(p) => { setCreating(null); setOpen(p); }}
+        />
+      )}
+      {addingVariant && (
+        <NewProduct
+          variantOf={addingVariant}
+          onClose={() => { setOpen(addingVariant); setAddingVariant(null); }}
+          onCreated={(p) => {
+            setAddingVariant(null);
+            qc.invalidateQueries({ queryKey: ['library'] });
+            qc.invalidateQueries({ queryKey: ['variants'] });
+            setOpen(p);
+          }}
+          onOpenExisting={(p) => { setAddingVariant(null); setOpen(p); }}
         />
       )}
     </div>
@@ -496,9 +518,11 @@ function Card({
   );
 }
 
-function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted }: {
+function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpenVariant, onAddVariant }: {
   product: ShowroomProduct; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
   onCopy?: (p: ShowroomProduct) => void;
+  onOpenVariant?: (p: ShowroomProduct) => void;
+  onAddVariant?: (p: ShowroomProduct) => void;
   onEdit?: (p: ShowroomProduct) => void;
   onDeleted?: (p: ShowroomProduct) => void;
 }) {
@@ -605,27 +629,64 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted }: {
               <Row k="Photos" v={`${gallery.length}`} />
             </dl>
 
-            {variants.length > 1 && (
+            {(variants.length > 1 || onAddVariant) && (
               <div className="mt-5">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
-                  {variants.length} colour variants
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {variants.map((v) => (
-                    <button
-                      key={v.id}
-                      onClick={() => tray.toggle(v)}
-                      className={
-                        'rounded border px-2 py-1 text-[11px] ' +
-                        (tray.has(v.id)
-                          ? 'border-[#2F4C69] bg-[#2F4C69] text-white'
-                          : 'border-neutral-200 text-neutral-600 hover:border-neutral-400')
-                      }
-                    >
-                      {v.color || v.styleNumber.replace(v.baseStyleNumber, '').replace(/^-/, '') || 'base'}
-                    </button>
-                  ))}
-                </div>
+                {onAddVariant && (
+                  <button onClick={() => onAddVariant(product)}
+                    className="group flex w-full items-center gap-3.5 rounded-md border-2 border-dashed border-[#2F4C69]/40 bg-[#2F4C69]/[0.04] px-4 py-3.5 text-left transition-colors hover:border-[#2F4C69] hover:bg-[#2F4C69]/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2F4C69]">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#2F4C69] text-white transition-transform group-hover:scale-105">
+                      <Plus className="h-5 w-5" strokeWidth={2.5} />
+                    </span>
+                    <span>
+                      <span className="block text-[15px] font-semibold text-[#2F4C69]">Add colourway</span>
+                      <span className="block text-[12.5px] text-neutral-500">Add another colour of this design, with its own photos</span>
+                    </span>
+                  </button>
+                )}
+                {variants.length > 1 && (
+                  <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
+                    {variants.length} colourways
+                  </div>
+                )}
+                {variants.length > 1 && (
+                  <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-5">
+                    {variants.map((v) => {
+                      const name = v.color || v.styleNumber.replace(v.baseStyleNumber, '').replace(/^-/, '') || 'Base';
+                      const current = v.id === product.id;
+                      const picked = tray.has(v.id);
+                      const hero = heroImage(v);
+                      return (
+                        <div key={v.id} className="relative">
+                          <button
+                            onClick={() => !current && onOpenVariant?.(v)}
+                            title={current ? `${name} (showing)` : `Open ${name}`}
+                            aria-current={current || undefined}
+                            className={
+                              'block w-full overflow-hidden rounded-sm text-left ' +
+                              (current ? 'shadow-[0_0_0_2px_#2F4C69]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)] hover:shadow-[0_0_0_1px_#a3a3a3]')
+                            }
+                          >
+                            <div className="aspect-square bg-neutral-100">
+                              {hero && <img src={thumb(hero, 160)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                            </div>
+                            <div className="truncate px-1 py-1 text-[10.5px] text-neutral-700">{name}</div>
+                          </button>
+                          <button
+                            onClick={() => tray.toggle(v)}
+                            aria-label={picked ? `Unselect ${name}` : `Select ${name}`}
+                            aria-pressed={picked}
+                            className={
+                              'absolute left-1 top-1 grid h-5 w-5 place-items-center rounded border ' +
+                              (picked ? 'border-[#2F4C69] bg-[#2F4C69] text-white' : 'border-neutral-300 bg-white/90 text-transparent hover:border-neutral-500')
+                            }
+                          >
+                            <Check className="h-3 w-3" strokeWidth={3} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

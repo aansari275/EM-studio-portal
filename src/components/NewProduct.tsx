@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Plus } from 'lucide-react';
 import {
-  createShowroomProduct, addProductPhotos, findDuplicateStyle, styleKey, type ShowroomProduct,
+  createShowroomProduct, addProductPhotos, findDuplicateStyle, styleKey, variantStyleNumber,
+  type ShowroomProduct,
 } from '../lib/firebase';
+import { getLibraryVariants } from '../lib/library';
 import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } from '../lib/options';
 import { PhotoPicker } from './PhotoPicker';
 
@@ -17,33 +19,41 @@ import { PhotoPicker } from './PhotoPicker';
  *
  * `initial` prefills the specs when copying an existing design. The design
  * number and photos are never carried over: a copy is a new design.
+ *
+ * `variantOf` opens it as a new colour variant of that design instead: the
+ * design number is fixed, the colour name is required, the specs start from
+ * the design, and the record is saved as <design>-<COLOUR> grouped under it.
+ * Typing a number that already exists offers to switch into this mode.
  */
 export type NewProductInitial = Partial<Record<'construction' | 'materials' | 'color' | 'size' | 'gsm', string>>;
 
 export function NewProduct({
   initial,
+  variantOf: variantOfProp,
   onClose,
   onCreated,
   onOpenExisting,
 }: {
   initial?: NewProductInitial;
+  variantOf?: ShowroomProduct;
   onClose: () => void;
   onCreated: (p: ShowroomProduct) => void;
   onOpenExisting?: (p: ShowroomProduct) => void;
 }) {
+  const [variantOf, setVariantOf] = useState<ShowroomProduct | undefined>(variantOfProp);
+  const base = variantOf ? (variantOf.baseStyleNumber || variantOf.styleNumber).trim() : '';
+  // A variant starts from its design's specs, but never its colour.
+  const start = variantOf ? { ...specsOf(variantOf), color: '' } : initial;
   const [f, setF] = useState({
     styleNumber: '',
-    construction: initial?.construction || '',
-    color: initial?.color || '',
-    size: initial?.size || '',
-    gsm: initial?.gsm || '',
+    construction: start?.construction || '',
+    color: start?.color || '',
+    size: start?.size || '',
+    gsm: start?.gsm || '',
   });
   // Stored as one comma separated string; the form edits one row per material.
-  const [materials, setMaterials] = useState<string[]>(() => {
-    const list = (initial?.materials || '').split(',').map((m) => m.trim()).filter(Boolean);
-    return list.length ? list : [''];
-  });
-  const copying = !!(initial && Object.values(initial).some(Boolean));
+  const [materials, setMaterials] = useState<string[]>(() => splitMaterials(start?.materials));
+  const copying = !variantOf && !!(initial && Object.values(initial).some(Boolean));
   const [slots, setSlots] = useState<{ file: File; original?: File }[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -73,13 +83,42 @@ export function NewProduct({
   const { data: existing } = useQuery({
     queryKey: ['style-duplicate', checkKey],
     queryFn: () => findDuplicateStyle(f.styleNumber),
-    enabled: checkKey.length >= 3,
+    enabled: !variantOf && checkKey.length >= 3,
     staleTime: 30_000,
   });
   // Ignore an answer that belongs to what was typed a moment ago.
-  const duplicate = checkKey === typedKey && checkKey.length >= 3 ? existing ?? null : null;
+  const duplicate = !variantOf && checkKey === typedKey && checkKey.length >= 3 ? existing ?? null : null;
   const [armedFor, setArmedFor] = useState('');
   const confirming = !!duplicate && armedFor === typedKey;
+
+  // The colours this design already has, so the same one is not added twice.
+  const { data: siblings = [] } = useQuery({
+    queryKey: ['variants', base],
+    queryFn: () => getLibraryVariants(base),
+    enabled: !!base,
+  });
+  const colourKey = styleKey(f.color);
+  const variantStyle = variantOf ? variantStyleNumber(base, f.color) : '';
+  const sameColour = variantOf && colourKey
+    ? siblings.find((v) => styleKey(v.color || '') === colourKey || styleKey(v.styleNumber) === styleKey(variantStyle))
+    : undefined;
+
+  /** Switch from a clashing new design to a colour variant of the existing one. */
+  function makeVariantOf(p: ShowroomProduct) {
+    const spec = specsOf(p);
+    // Keep anything already chosen; fill the blanks from the design.
+    setF((cur) => ({
+      styleNumber: '',
+      construction: cur.construction || spec.construction,
+      size: cur.size || spec.size,
+      gsm: cur.gsm || spec.gsm,
+      color: cur.color,
+    }));
+    setMaterials((cur) => (cur.some((m) => m.trim()) ? cur : splitMaterials(spec.materials)));
+    setArmedFor('');
+    setError('');
+    setVariantOf(p);
+  }
 
   /** A value typed with "+ Add new" is saved for everyone, then selected. */
   const addOption = (kind: OptionKind) => async (v: string) => {
@@ -92,15 +131,28 @@ export function NewProduct({
   };
 
   async function save() {
-    if (!f.styleNumber.trim()) return setError('Type the design number first.');
-    if (duplicate && !confirming) return setArmedFor(typedKey);
+    if (variantOf) {
+      if (!f.color.trim()) return setError('Type the colour name of this colourway.');
+      if (sameColour) return setError(`${base} already has ${sameColour.color || sameColour.styleNumber}.`);
+    } else {
+      if (!f.styleNumber.trim()) return setError('Type the design number first.');
+      if (duplicate && !confirming) return setArmedFor(typedKey);
+    }
     setError('');
     try {
       setBusy('Creating…');
-      let created = await createShowroomProduct({
-        ...f,
-        materials: materials.map((m) => m.trim()).filter(Boolean).join(', '),
-      });
+      const specs = { ...f, materials: materials.map((m) => m.trim()).filter(Boolean).join(', ') };
+      let created = await createShowroomProduct(
+        variantOf
+          ? {
+              ...specs,
+              color: f.color.trim(),
+              styleNumber: variantStyle,
+              baseStyleNumber: base,
+              displayName: `${base} · ${f.color.trim()}`,
+            }
+          : specs
+      );
       // Photos are uploaded only once the design exists, so a cancelled entry
       // never leaves orphan files behind in storage.
       const photos = slots.map((s) => s.file);
@@ -122,8 +174,9 @@ export function NewProduct({
       onClick={onClose} role="dialog" aria-modal="true" aria-label="New design">
       <div className="w-full max-w-lg rounded-md bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-4 border-b border-neutral-100 px-6 py-5">
-          <h2 className="font-serif text-[22px]">New design</h2>
+          <h2 className="font-serif text-[22px]">{variantOf ? 'Add colourway' : 'New design'}</h2>
           {copying && <span className="text-[12px] text-neutral-400">Specs copied. Add the number and photos.</span>}
+          {variantOf && <span className="text-[12px] text-neutral-400">Another colour of this design. Specs copied, change any that differ.</span>}
           <div className="flex-1" />
           <button onClick={onClose} aria-label="Close"
             className="rounded p-1.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900">
@@ -132,8 +185,47 @@ export function NewProduct({
         </div>
 
         <div className="space-y-5 px-6 py-6">
-          <Field label="Design number" required hint="For example EM-26-MA-7420"
-            value={f.styleNumber} onChange={set('styleNumber')} autoFocus onEnter={save} />
+          {variantOf ? (
+            <>
+              <div>
+                <Label>Design number</Label>
+                <div className="mt-1 flex items-center gap-3 border-b border-neutral-100 pb-1.5">
+                  <span className="font-mono text-[15px]">{base}</span>
+                  {variantOfProp ? null : (
+                    <button type="button" onClick={() => setVariantOf(undefined)}
+                      className="text-[12px] font-semibold text-[#2F4C69] hover:underline">
+                      Make it a new design instead
+                    </button>
+                  )}
+                </div>
+                {siblings.length > 0 && (
+                  <span className="mt-1 block text-[11.5px] text-neutral-400">
+                    Already in: {siblings.map((v) => v.color || v.styleNumber).join(', ')}
+                  </span>
+                )}
+              </div>
+              <div>
+                <Field label="Colourway name" required hint={f.color.trim()
+                    ? `Saved as ${variantStyle}`
+                    : 'For example Ivory Grey or V2'}
+                  value={f.color} onChange={set('color')} autoFocus onEnter={save} />
+                {sameColour && (
+                  <div role="status" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-[#98671A] bg-[#98671A]/[0.06] px-3 py-2 text-[12.5px] text-[#7a5215]">
+                    <span>{base} already has this colourway.</span>
+                    {onOpenExisting && (
+                      <button type="button" onClick={() => onOpenExisting(sameColour)}
+                        className="font-semibold text-[#2F4C69] hover:underline">
+                        Open it and add photos there
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <Field label="Design number" required hint="For example EM-26-MA-7420"
+              value={f.styleNumber} onChange={set('styleNumber')} autoFocus onEnter={save} />
+          )}
           {duplicate && (
             <div role="status" className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-[#98671A] bg-[#98671A]/[0.06] px-3 py-2 text-[12.5px] text-[#7a5215]">
               <span>
@@ -141,6 +233,10 @@ export function NewProduct({
                 {duplicate.styleNumber && styleKey(duplicate.styleNumber) === typedKey && duplicate.styleNumber !== f.styleNumber.trim()
                   ? ` as ${duplicate.styleNumber}.` : '.'}
               </span>
+              <button type="button" onClick={() => makeVariantOf(duplicate)}
+                className="font-semibold text-[#2F4C69] hover:underline">
+                Add a colourway to it
+              </button>
               {onOpenExisting && (
                 <button type="button" onClick={() => onOpenExisting(duplicate)}
                   className="font-semibold text-[#2F4C69] hover:underline">
@@ -184,7 +280,7 @@ export function NewProduct({
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Colour" value={f.color} onChange={set('color')} onEnter={save} />
+            {!variantOf && <Field label="Colour" value={f.color} onChange={set('color')} onEnter={save} />}
             <Field label="GSM" value={f.gsm} onChange={set('gsm')} onEnter={save} />
           </div>
 
@@ -209,12 +305,24 @@ export function NewProduct({
           <button onClick={onClose} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
           <button onClick={save} disabled={!!busy}
             className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
-            {busy || (confirming ? 'Save anyway' : 'Create design')}
+            {busy || (variantOf ? 'Create colourway' : confirming ? 'Save anyway' : 'Create design')}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+function specsOf(p: ShowroomProduct) {
+  return {
+    construction: p.construction || '', materials: p.materials || '',
+    color: p.color || '', size: p.size || '', gsm: p.gsm || '',
+  };
+}
+
+function splitMaterials(v?: string): string[] {
+  const list = (v || '').split(',').map((m) => m.trim()).filter(Boolean);
+  return list.length ? list : [''];
 }
 
 export function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {

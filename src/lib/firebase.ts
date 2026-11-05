@@ -1523,6 +1523,16 @@ export function styleSlug(styleNumber: string): string {
   return (styleNumber || '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+/**
+ * Style number of a colour variant: the design number plus the colour,
+ * EM-17-AM-418 + "Grey Yellow" -> EM-17-AM-418-GREY-YELLOW, the same shape the
+ * older showroom variants already use.
+ */
+export function variantStyleNumber(baseStyleNumber: string, colour: string): string {
+  const c = styleSlug(colour);
+  return c ? `${baseStyleNumber.trim()}-${c}` : baseStyleNumber.trim();
+}
+
 /** EM-23-MA-6727-GREY -> EM-23-MA-6727. Matches mapShowroomDoc's own rule. */
 export function deriveBaseStyle(styleNumber: string): string {
   const parts = styleSlug(styleNumber).split('-');
@@ -1531,6 +1541,9 @@ export function deriveBaseStyle(styleNumber: string): string {
 
 export interface NewProductInput {
   styleNumber: string;
+  /** Set for a colour variant, so it groups under its design even when the
+   *  design number does not follow the four-part EM-YY-XX-NNNN pattern. */
+  baseStyleNumber?: string;
   displayName?: string;
   construction?: string;
   materials?: string;
@@ -1610,7 +1623,7 @@ export async function createShowroomProduct(input: NewProductInput): Promise<Sho
 
   const payload: Record<string, unknown> = {
     styleNumber,
-    baseStyleNumber: deriveBaseStyle(styleNumber),
+    baseStyleNumber: (input.baseStyleNumber || '').trim() || deriveBaseStyle(styleNumber),
     displayName: (input.displayName || styleNumber).trim(),
     firebaseUrl: '',
     additionalImages: [],
