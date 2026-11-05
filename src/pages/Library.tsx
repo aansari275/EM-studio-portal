@@ -19,6 +19,8 @@ import { thumb, heroImage, orderedImages } from '../lib/img';
 import { canonicalConstruction } from '../lib/library';
 import { NewProduct, type NewProductInitial } from '../components/NewProduct';
 import { PhotoDrop } from '../components/PhotoDrop';
+import { PhotoOrder } from '../components/PhotoOrder';
+import { SlidePreview } from '../components/SlidePreview';
 import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct } from '../lib/productEdit';
 
@@ -595,26 +597,11 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpen
               )}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {gallery.map((g, i) => (
-                <button
-                  key={g}
-                  onClick={() => setShot(g)}
-                  title={i === 0 ? 'Main photo' : `Photo ${i + 1}`}
-                  className={
-                    'relative h-14 w-14 shrink-0 overflow-hidden rounded-sm ' +
-                    (g === shot ? 'shadow-[0_0_0_2px_#2F4C69]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]')
-                  }
-                >
-                  <img src={thumb(g, 120)} alt="" className="h-full w-full object-cover" />
-                  {i === 0 && (
-                    <span className="absolute inset-x-0 bottom-0 bg-black/55 text-center text-[8px] font-semibold uppercase tracking-wide text-white">
-                      Main
-                    </span>
-                  )}
-                </button>
-              ))}
+              <PhotoOrder product={product} photos={gallery} shot={shot} onShot={setShot}
+                onSaved={(p) => onChanged?.(p)} />
               <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
             </div>
+            <SlidePreview photos={gallery} onPick={setShot} />
           </div>
 
           <div>

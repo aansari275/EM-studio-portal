@@ -140,3 +140,37 @@ export async function restoreProduct(p: ShowroomProduct): Promise<void> {
   });
   invalidateShowroomCache();
 }
+
+/**
+ * Save a new photo order from the preview (drag or right-click). The first
+ * photo becomes the main one. Only the order changes: no photo is added or
+ * removed, and the specs are left alone.
+ */
+export async function reorderPhotos(p: ShowroomProduct, photos: string[]): Promise<ShowroomProduct> {
+  const [hero, ...rest] = photos;
+  if (isArchive(p)) {
+    const r = archiveRef(p);
+    const old = (await getDoc(r)).data() as any;
+    if (!old) throw new Error('This archive record no longer exists.');
+    const byUrl = new Map<string, any>((old.photos || []).map((ph: any) => [ph?.url, ph]));
+    await updateDoc(r, {
+      photos: photos.map((url) => byUrl.get(url) || { url }),
+      heroPinned: true,
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUserEmail() || 'studio',
+    });
+    return { ...p, firebaseUrl: hero || '', additionalImages: rest, heroPinned: true };
+  }
+  const r = showroomRef(p);
+  await updateDoc(r, {
+    firebaseUrl: hero || '',
+    additionalImages: rest,
+    // The studio chose this order, so heroImage() must not second-guess it.
+    heroPinned: true,
+    updatedAt: serverTimestamp(),
+    updatedBy: currentUserEmail() || 'studio',
+  });
+  invalidateShowroomCache();
+  const fresh = await getDoc(r);
+  return mapShowroomData(fresh.id, fresh.data());
+}

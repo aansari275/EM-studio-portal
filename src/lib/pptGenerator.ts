@@ -1,4 +1,5 @@
 import pptxgen from 'pptxgenjs';
+import { PHOTO_SLOTS, type Box } from './deckSlots';
 import { orderedImages } from './img';
 import type { ShowroomProduct } from './firebase';
 import type { DeckImages } from './deckImages';
@@ -123,15 +124,10 @@ export async function buildPptxBlob(
   return (await buildPptx(products, title, opts).write({ outputType: 'blob' })) as Blob;
 }
 
-type Box = { x: number; y: number; w: number; h: number };
 
-// The house product slide. Do not "improve" these; see addProductSlide.
-const PRIMARY: Box = { x: 0.121, y: 0.273, w: 5.086, h: 7.118 };
-const REST: Box[] = [
-  { x: 5.149, y: 0.446, w: 4.861, h: 3.255 },
-  { x: 5.134, y: 3.921, w: 2.346, h: 3.396 },
-  { x: 8.362, y: 4.016, w: 4.766, h: 3.039 },
-];
+// The house product slide, shared with the slot diagram in the preview.
+// Do not "improve" these; see deckSlots.ts and addProductSlide.
+const [PRIMARY, ...REST] = PHOTO_SLOTS;
 
 /**
  * Every photo the deck will use and the slot it lands in, in inches. Photos
@@ -408,7 +404,7 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
       fontFace: FONTS.main, color: COLORS.gray, align: 'center' });
   }
 
-  // === SECOND, THIRD, FOURTH ===
+  // === SECOND, THIRD, FOURTH, in the slots deckSlots.ts gives them ===
   REST.forEach((box, i) => placeImage(slide, images[i + 1], box));
 
   // === RIGHT: the spec block ===

@@ -110,6 +110,7 @@ function mapEm(id: string, d: any): ShowroomProduct {
     source: 'ppt_archive',
     tags: [],
     deleted: !!d.deletedAt,
+    heroPinned: !!d.heroPinned,
   };
 }
 

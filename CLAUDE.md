@@ -283,3 +283,9 @@ netlify deploy --prod
 - UI says **colourway**, never "variant" (Abdul's wording). Detail panel: big dashed **Add colourway** card, then colourway photo tiles (click opens, tick adds to selection). `NewProduct` takes `variantOf` for this mode; typing an existing number in New design offers "Add a colourway to it".
 - **Duplicates are allowed** (Abdul, 5 Nov 2026), both style numbers and colourways. The form only warns. The first record keeps the plain slug as its doc id, later ones get `<slug>--2`, `--3` (styleSlug never emits `--`, so no clash with a real number). `addProductPhotos` files photos under the **doc id**, not the style slug, so a duplicate never overwrites the first record's `main.jpg`.
 - `library.ts` `dedupe()` / `joinPages()` keep every showroom record (by id) and only drop an archive copy of a style+colour the showroom already has. Before this, a duplicate was silently hidden from the grid.
+
+## Photo order and the slot diagram (5 Nov 2026)
+
+- **Reorder in the preview** (`components/PhotoOrder.tsx`): drag a thumbnail onto another, or right-click for Make main / Make 2nd... Saves at once via `reorderPhotos()` in `productEdit.ts` (sets `heroPinned: true`, also on `em_products`, which `mapEm` now reads).
+- **Slot geometry lives in `lib/deckSlots.ts`**, shared by `pptGenerator.ts` and the diagram (`components/SlidePreview.tsx`). `PHOTO_SLOTS` is photo 1..4 in order; to move a number, reorder that list. Numbering per Abdul's reference slide: 1 left tall, 2 bottom middle, 3 top wide, 4 bottom right (before this, 2 was the top slot). Box sizes unchanged (Zara house deck). `SLOT_HINTS` are the shot names shown to the studio.
+- Local `vite dev` freezes the tab on the library grid: `thumb()` serves 3500-4000px originals in dev. Verify on the deployed site.
