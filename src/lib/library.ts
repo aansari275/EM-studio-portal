@@ -158,13 +158,19 @@ function dedupe(items: ShowroomProduct[]): ShowroomProduct[] {
   const out: ShowroomProduct[] = [];
   for (const p of items) {
     if (p.deleted) continue;
-    const key = `${normStyle(p.styleNumber)}|${(p.color || '').toUpperCase().trim()}`;
-    if (seen.has(key)) continue;
+    // Showroom records are all kept, even two with the same number and colour:
+    // duplicates are allowed on purpose. Only an archive copy of a style the
+    // showroom already has is dropped.
+    const key = dupKey(p);
+    if (p.source === 'ppt_archive' ? seen.has(key) : seen.has(`id:${p.id}`)) continue;
     seen.add(key);
+    seen.add(`id:${p.id}`);
     out.push(p);
   }
   return out;
 }
+
+const dupKey = (p: ShowroomProduct) => `${normStyle(p.styleNumber)}|${(p.color || '').toUpperCase().trim()}`;
 
 export async function getLibraryProducts(n = 200): Promise<ShowroomProduct[]> {
   const [showroom, em] = await Promise.all([
@@ -213,13 +219,21 @@ export async function searchLibraryPage(term: string, offset = 0, n = LIBRARY_PA
 export function joinPages(pages: LibraryPage[]): ShowroomProduct[] {
   const out: ShowroomProduct[] = [];
   const at = new Map<string, number>();
-  const keyOf = (p: ShowroomProduct) => `${normStyle(p.styleNumber)}|${(p.color || '').toUpperCase().trim()}`;
+  const ids = new Set<string>();
   for (const page of pages) {
     for (const p of page.items) {
-      const k = keyOf(p);
+      if (ids.has(p.id)) continue;
+      const k = dupKey(p);
       const i = at.get(k);
-      if (i === undefined) { at.set(k, out.length); out.push(p); }
-      else if (out[i].source === 'ppt_archive' && p.source !== 'ppt_archive') out[i] = p;
+      if (i !== undefined && out[i].source === 'ppt_archive' && p.source !== 'ppt_archive') {
+        ids.delete(out[i].id); out[i] = p;
+      } else if (i !== undefined && p.source === 'ppt_archive') {
+        continue;
+      } else {
+        if (i === undefined) at.set(k, out.length);
+        out.push(p);
+      }
+      ids.add(p.id);
     }
   }
   return out;

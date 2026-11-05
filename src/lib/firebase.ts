@@ -1618,8 +1618,12 @@ export async function createShowroomProduct(input: NewProductInput): Promise<Sho
   if (!styleNumber) throw new Error('A style number is required.');
   const slug = styleSlug(styleNumber);
 
-  const clash = await findProductByStyle(styleNumber);
-  if (clash) throw new Error(`${styleNumber} already exists. Open it and add photos there instead.`);
+  // Duplicate style numbers are allowed (Abdul, 5 Nov 2026): the form warns,
+  // she decides. The first record keeps the plain slug as its id; later ones
+  // get <slug>--2, --3. styleSlug never emits a double dash, so these ids can
+  // never belong to a real style number.
+  let id = slug;
+  for (let n = 2; (await getDoc(doc(db, SHOWROOM_COLLECTION, id))).exists(); n++) id = `${slug}--${n}`;
 
   const payload: Record<string, unknown> = {
     styleNumber,
@@ -1638,9 +1642,9 @@ export async function createShowroomProduct(input: NewProductInput): Promise<Sho
     if (v) payload[k] = v;
   }
 
-  await setDoc(doc(db, SHOWROOM_COLLECTION, slug), payload);
+  await setDoc(doc(db, SHOWROOM_COLLECTION, id), payload);
   invalidateShowroomCache();
-  const created = await getDoc(doc(db, SHOWROOM_COLLECTION, slug));
+  const created = await getDoc(doc(db, SHOWROOM_COLLECTION, id));
   return mapShowroomDoc(created);
 }
 
@@ -1654,7 +1658,10 @@ export async function addProductPhotos(
   onProgress?: (done: number, total: number) => void
 ): Promise<ShowroomProduct> {
   if (!files.length) return product;
-  const slug = styleSlug(product.styleNumber || product.baseStyleNumber);
+  // The doc id, not the style number: a duplicate number has its own id
+  // (<slug>--2) and must not write main.jpg into the first record's folder.
+  const slug = (product.id && !product.id.startsWith('em:') ? product.id : '') ||
+    styleSlug(product.styleNumber || product.baseStyleNumber);
   if (!slug) throw new Error('This product has no style number, so there is nowhere to file the photos.');
 
   const docRef = doc(db, SHOWROOM_COLLECTION, slug);

@@ -72,8 +72,8 @@ export function NewProduct({
   const set = (k: keyof typeof f) => (v: string) => setF((cur) => ({ ...cur, [k]: v }));
 
   // Look for the same style number while it is typed, ignoring case, spaces,
-  // dashes and dots. A match warns but does not block: two spellings of one
-  // number can be two genuine designs, so the second click decides.
+  // dashes and dots. A match only warns: duplicates are allowed, and the
+  // warning offers the colourway route in case that is what was meant.
   const typedKey = styleKey(f.styleNumber);
   const [checkKey, setCheckKey] = useState('');
   useEffect(() => {
@@ -88,8 +88,6 @@ export function NewProduct({
   });
   // Ignore an answer that belongs to what was typed a moment ago.
   const duplicate = !variantOf && checkKey === typedKey && checkKey.length >= 3 ? existing ?? null : null;
-  const [armedFor, setArmedFor] = useState('');
-  const confirming = !!duplicate && armedFor === typedKey;
 
   // The colours this design already has, so the same one is not added twice.
   const { data: siblings = [] } = useQuery({
@@ -115,7 +113,6 @@ export function NewProduct({
       color: cur.color,
     }));
     setMaterials((cur) => (cur.some((m) => m.trim()) ? cur : splitMaterials(spec.materials)));
-    setArmedFor('');
     setError('');
     setVariantOf(p);
   }
@@ -133,10 +130,8 @@ export function NewProduct({
   async function save() {
     if (variantOf) {
       if (!f.color.trim()) return setError('Type the colour name of this colourway.');
-      if (sameColour) return setError(`${base} already has ${sameColour.color || sameColour.styleNumber}.`);
-    } else {
-      if (!f.styleNumber.trim()) return setError('Type the design number first.');
-      if (duplicate && !confirming) return setArmedFor(typedKey);
+    } else if (!f.styleNumber.trim()) {
+      return setError('Type the design number first.');
     }
     setError('');
     try {
@@ -211,7 +206,7 @@ export function NewProduct({
                   value={f.color} onChange={set('color')} autoFocus onEnter={save} />
                 {sameColour && (
                   <div role="status" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-[#98671A] bg-[#98671A]/[0.06] px-3 py-2 text-[12.5px] text-[#7a5215]">
-                    <span>{base} already has this colourway.</span>
+                    <span>{base} already has this colourway. You can still add it again.</span>
                     {onOpenExisting && (
                       <button type="button" onClick={() => onOpenExisting(sameColour)}
                         className="font-semibold text-[#2F4C69] hover:underline">
@@ -296,8 +291,8 @@ export function NewProduct({
 
         <div className="flex items-center gap-3 border-t border-neutral-100 px-6 py-4">
           <p className="flex-1 text-[12.5px] text-neutral-400">
-            {confirming
-              ? 'Press Save anyway to create it as well.'
+            {duplicate
+              ? 'Creating it adds a second design with this number.'
               : slots.length
                 ? `${slots.length} photo${slots.length > 1 ? 's' : ''} ready. The first is the main one.`
                 : 'Add as many photos as you like, or add them later.'}
@@ -305,7 +300,7 @@ export function NewProduct({
           <button onClick={onClose} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
           <button onClick={save} disabled={!!busy}
             className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
-            {busy || (variantOf ? 'Create colourway' : confirming ? 'Save anyway' : 'Create design')}
+            {busy || (variantOf ? 'Create colourway' : 'Create design')}
           </button>
         </div>
       </div>
