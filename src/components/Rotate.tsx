@@ -41,9 +41,8 @@ export function useRotate(product: ShowroomProduct, url: string, onSaved: (p: Sh
     }, 900);
   }
 
-  // Turned sideways, a photo is scaled up so it still fills its box while it waits.
   const style = turns
-    ? { transform: `rotate(${turns * 90}deg)${turns % 2 ? ' scale(1.25)' : ''}`, transition: 'transform 200ms ease' }
+    ? { transform: `rotate(${turns * 90}deg)`, transition: 'transform 200ms ease' }
     : undefined;
   return { rotate, busy, error, style };
 }

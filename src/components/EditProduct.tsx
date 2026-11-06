@@ -150,7 +150,7 @@ export function EditProduct({
               <div className="mt-2 flex flex-wrap gap-2">
                 {photos.map((u, i) => (
                   <div key={u} className="group relative h-20 w-20 overflow-hidden rounded-sm bg-neutral-100 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]">
-                    <img src={thumb(u, 160)} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
+                    <img src={thumb(u, 160)} alt={`Photo ${i + 1}`} className="h-full w-full bg-white object-contain" />
                     {i === 0 ? (
                       <span className="absolute inset-x-0 bottom-0 bg-black/55 text-center text-[9px] font-semibold uppercase tracking-wide text-white">
                         Main

@@ -439,7 +439,7 @@ function Card({
     <div className="group">
       <div
         className={
-          'relative aspect-[4/5] overflow-hidden rounded-sm bg-neutral-100 transition-shadow ' +
+          'relative aspect-[4/5] overflow-hidden rounded-sm bg-white transition-shadow ' +
           (selected
             ? 'shadow-[0_0_0_2px_#2F4C69]'
             : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05)] group-hover:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.14)]')
@@ -449,7 +449,7 @@ function Card({
         <button onClick={onOpen} className="block h-full w-full" aria-label={`Open ${product.displayName}`}>
           {hasPhoto ? (
             <img src={thumb(hero, 420)} alt={product.displayName} loading="lazy"
-              style={turn.style} className="h-full w-full object-cover" />
+              style={turn.style} className="h-full w-full object-contain" />
           ) : (
             <span className="flex h-full w-full items-center justify-center text-[11px] text-neutral-400">
               No photo
@@ -622,10 +622,10 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpen
 
         <div className="grid gap-7 p-6 sm:grid-cols-[1.2fr_1fr]">
           <div>
-            <div className="relative aspect-[4/5] overflow-hidden rounded-sm bg-neutral-100">
+            <div className="relative aspect-[4/5] overflow-hidden rounded-sm bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
               {shot ? (
                 <>
-                  <img src={thumb(shot, 900)} alt={product.displayName} style={turn.style} className="h-full w-full object-cover" />
+                  <img src={thumb(shot, 900)} alt={product.displayName} style={turn.style} className="h-full w-full object-contain" />
                   <RotateButton onClick={turn.rotate} busy={turn.busy} label="Turn this photo 90° clockwise"
                     className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-neutral-700 shadow-[0_1px_3px_rgba(0,0,0,0.2)] hover:text-[#2F4C69] [&_svg]:h-4 [&_svg]:w-4" />
                   {turn.error && (
@@ -694,7 +694,7 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpen
                             }
                           >
                             <div className="aspect-square bg-neutral-100">
-                              {hero && <img src={thumb(hero, 160)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                              {hero && <img src={thumb(hero, 160)} alt="" loading="lazy" className="h-full w-full object-contain" />}
                             </div>
                             <div className="truncate px-1 py-1 text-[10.5px] text-neutral-700">{name}</div>
                           </button>

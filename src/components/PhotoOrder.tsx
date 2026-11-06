@@ -128,7 +128,7 @@ export function PhotoOrder({
             (dragFrom === i ? ' opacity-40' : '')
           }
         >
-          <img src={thumb(g, 120)} alt="" draggable={false} className="h-full w-full object-cover" />
+          <img src={thumb(g, 120)} alt="" draggable={false} className="h-full w-full bg-white object-contain" />
           <span className={
             'absolute inset-x-0 bottom-0 text-center text-[8px] font-semibold uppercase tracking-wide text-white ' +
             (i === 0 ? 'bg-[#2F4C69]/90' : 'bg-black/55')
