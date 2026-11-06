@@ -17,6 +17,8 @@ type Ctx = {
   has: (id: string) => boolean;
   toggle: (p: ShowroomProduct) => void;
   remove: (id: string) => void;
+  /** Swap in a fresher copy of a selected design (after its photo changes). */
+  replace: (p: ShowroomProduct) => void;
   clear: () => void;
   count: number;
 };
@@ -51,6 +53,7 @@ export function SelectionProvider({ children }: { children: ReactNode }) {
       toggle: (p) =>
         setItems((cur) => (cur.some((x) => x.id === p.id) ? cur.filter((x) => x.id !== p.id) : [...cur, p])),
       remove: (id) => setItems((cur) => cur.filter((x) => x.id !== id)),
+      replace: (p) => setItems((cur) => cur.map((x) => (x.id === p.id ? p : x))),
       clear: () => setItems([]),
     };
   }, [items]);

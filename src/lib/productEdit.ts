@@ -2,6 +2,7 @@ import { doc, getDoc, updateDoc, serverTimestamp, deleteField } from 'firebase/f
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, invalidateShowroomCache, mapShowroomData, styleSlug, deriveBaseStyle, type ShowroomProduct } from './firebase';
 import { currentUserEmail } from './auth';
+import { orderedImages } from './img';
 
 /**
  * Editing and deleting a design from the library.
@@ -173,4 +174,51 @@ export async function reorderPhotos(p: ShowroomProduct, photos: string[]): Promi
   invalidateShowroomCache();
   const fresh = await getDoc(r);
   return mapShowroomData(fresh.id, fresh.data());
+}
+
+/**
+ * Turns one photo of a design by quarter turns (1 = 90° clockwise) and saves
+ * it as a NEW file next to the old one, then points the record at it. The old
+ * file stays in Storage, so nothing is lost. Rotating the pixels, rather than
+ * storing an angle, means decks, buyer links and the other apps all get the
+ * turned photo without knowing anything about it.
+ */
+export async function rotatePhoto(p: ShowroomProduct, url: string, quarterTurns: number): Promise<ShowroomProduct> {
+  const turns = ((quarterTurns % 4) + 4) % 4;
+  if (!turns) return p;
+  const photos = orderedImages(p);
+  const at = photos.indexOf(url);
+  if (at < 0) throw new Error('That photo is no longer on this design.');
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Could not load the photo to turn it.');
+  const bmp = await createImageBitmap(await res.blob());
+  // Same ceiling as uploads: nothing downstream needs more than ~2000px.
+  const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale);
+  const h = Math.round(bmp.height * scale);
+  const side = turns % 2 === 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = side ? h : w;
+  canvas.height = side ? w : h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('This browser cannot turn photos.');
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((turns * Math.PI) / 2);
+  ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
+  bmp.close();
+  const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/jpeg', 0.92));
+  if (!blob) throw new Error('Could not save the turned photo.');
+
+  const folder = (p.id && !p.id.startsWith('em:') ? p.id : '') || styleSlug(p.styleNumber || p.baseStyleNumber || '');
+  if (!folder) throw new Error('This design has no style number, so there is nowhere to file the photo.');
+  const base = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'photo')
+    .split('/').pop()!.replace(/\.[a-z0-9]+$/i, '').replace(/-r\d+$/, '');
+  const sref = ref(storage, `products/${folder}/${base}-r${Date.now()}.jpg`);
+  await uploadBytes(sref, blob, { contentType: 'image/jpeg' });
+  const fresh = await getDownloadURL(sref);
+
+  const next = [...photos];
+  next[at] = fresh;
+  return reorderPhotos(p, next);
 }

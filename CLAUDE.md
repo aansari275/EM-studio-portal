@@ -289,3 +289,15 @@ netlify deploy --prod
 - **Reorder in the preview** (`components/PhotoOrder.tsx`): drag a thumbnail onto another, or right-click for Make main / Make 2nd... Saves at once via `reorderPhotos()` in `productEdit.ts` (sets `heroPinned: true`, also on `em_products`, which `mapEm` now reads).
 - **Slot geometry lives in `lib/deckSlots.ts`**, shared by `pptGenerator.ts` and the diagram (`components/SlidePreview.tsx`). `PHOTO_SLOTS` is photo 1..4 in order; to move a number, reorder that list. Numbering per Abdul's reference slide: 1 left tall, 2 bottom middle, 3 top wide, 4 bottom right (before this, 2 was the top slot). Box sizes unchanged (Zara house deck). `SLOT_HINTS` are the shot names shown to the studio.
 - Local `vite dev` freezes the tab on the library grid: `thumb()` serves 3500-4000px originals in dev. Verify on the deployed site.
+
+## Removing and turning photos
+
+- **Red cross on a thumbnail** (or "Remove photo" in the right-click menu) takes a photo
+  off the design via `reorderPhotos` with a shorter list. The Storage file is kept, and
+  "Photo removed. Undo" restores the old list.
+- **Rotate** (`rotatePhoto` in `productEdit.ts`, `useRotate` in `components/Rotate.tsx`):
+  ↻ on each grid card (main photo), ↻ on the big photo in the preview (the photo being
+  viewed), and "Rotate main photo" in the tray for every ticked design. The pixels are
+  turned in a canvas and saved as a NEW file `<name>-r<timestamp>.jpg` in the same folder,
+  then the record points at it, so decks, buyer links and other apps need no change and
+  the old file stays. Clicks within 0.9 s are batched into one save.

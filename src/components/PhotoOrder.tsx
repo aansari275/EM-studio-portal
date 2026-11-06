@@ -23,7 +23,9 @@ function move<T>(list: T[], from: number, to: number): T[] {
  * The thumbnail strip in the design preview, with the order editable in place:
  * drag a thumbnail onto another to put it there, or right-click it and choose
  * its position. Every thumbnail shows its position (Main, 2nd, 3rd...), and
- * that is the order decks and buyer links use. Saves straight away.
+ * that is the order decks and buyer links use. The red cross takes a photo
+ * off the design (the file stays in Storage, so Undo can put it back).
+ * Saves straight away.
  */
 export function PhotoOrder({
   product, photos, shot, onShot, onSaved,
@@ -41,6 +43,8 @@ export function PhotoOrder({
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [menu, setMenu] = useState<{ index: number; x: number; y: number } | null>(null);
   const [status, setStatus] = useState<'' | 'saving' | 'saved' | 'error'>('');
+  // The list before the last removal, so Undo can restore it.
+  const [undo, setUndo] = useState<string[] | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,11 +65,8 @@ export function PhotoOrder({
     };
   }, [menu]);
 
-  async function place(from: number, to: number) {
-    setMenu(null);
-    if (from === to) return;
+  async function save(next: string[]): Promise<boolean> {
     const before = order;
-    const next = move(order, from, to);
     setOrder(next);
     setStatus('saving');
     try {
@@ -73,17 +74,39 @@ export function PhotoOrder({
       setStatus('saved');
       onSaved?.(saved);
       setTimeout(() => setStatus((s) => (s === 'saved' ? '' : s)), 2000);
+      return true;
     } catch {
       setOrder(before);
       setStatus('error');
+      return false;
     }
+  }
+
+  function place(from: number, to: number) {
+    setMenu(null);
+    if (from === to) return;
+    setUndo(null);
+    save(move(order, from, to));
+  }
+
+  async function remove(i: number) {
+    setMenu(null);
+    const before = order;
+    if (await save(order.filter((_, j) => j !== i))) setUndo(before);
+  }
+
+  async function restore() {
+    if (!undo) return;
+    const list = undo;
+    setUndo(null);
+    await save(list);
   }
 
   return (
     <>
       {order.map((g, i) => (
+        <div key={g} className="group relative shrink-0">
         <button
-          key={g}
           draggable
           onClick={() => onShot(g)}
           onContextMenu={(e) => {
@@ -113,11 +136,30 @@ export function PhotoOrder({
             {ordinal(i)}
           </span>
         </button>
+        <button
+          type="button"
+          onClick={() => remove(i)}
+          title="Remove this photo"
+          aria-label={`Remove the ${ordinal(i).toLowerCase()} photo`}
+          className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-red-600 text-white shadow ring-2 ring-white transition-opacity hover:bg-red-700 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+        >
+          <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" aria-hidden>
+            <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </button>
+        </div>
       ))}
 
-      {status && (
+      {undo && status !== 'saving' ? (
+        <span className="text-[11px] text-neutral-500" role="status">
+          Photo removed.{' '}
+          <button type="button" onClick={restore} className="font-semibold text-[#2F4C69] underline underline-offset-2">
+            Undo
+          </button>
+        </span>
+      ) : status && (
         <span className={'text-[11px] ' + (status === 'error' ? 'text-red-600' : 'text-neutral-400')} role="status">
-          {status === 'saving' ? 'Saving order…' : status === 'saved' ? 'Order saved' : 'Could not save the order'}
+          {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : 'Could not save. Try again.'}
         </span>
       )}
 
@@ -126,7 +168,7 @@ export function PhotoOrder({
           ref={menuRef}
           role="menu"
           aria-label="Photo position"
-          style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 40 - order.length * 32) }}
+          style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 80 - order.length * 32) }}
           className="fixed z-[60] max-h-[70vh] w-44 overflow-y-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
         >
           <div className="px-3 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-neutral-400">
@@ -143,6 +185,14 @@ export function PhotoOrder({
               {to === 0 ? 'Make main photo' : `Make ${ordinal(to)}`}
             </button>
           ))}
+          <div className="my-1 border-t border-neutral-100" />
+          <button
+            role="menuitem"
+            onClick={() => remove(menu.index)}
+            className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-red-600 hover:bg-red-50"
+          >
+            Remove photo
+          </button>
         </div>
       )}
     </>

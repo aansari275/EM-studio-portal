@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { Search, Check, X, Plus, Copy, Pencil, Trash2 } from 'lucide-react';
+import { Search, Check, X, Plus, Copy, Pencil, Trash2, RotateCw } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import {
   getLibraryProducts,
@@ -22,7 +22,8 @@ import { PhotoDrop } from '../components/PhotoDrop';
 import { PhotoOrder } from '../components/PhotoOrder';
 import { SlidePreview } from '../components/SlidePreview';
 import { EditProduct } from '../components/EditProduct';
-import { deleteProduct, restoreProduct } from '../lib/productEdit';
+import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
+import { useRotate, RotateButton } from '../components/Rotate';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -59,6 +60,11 @@ export function Library() {
   const tray = useSelection();
   const navigate = useNavigate();
   const qc = useQueryClient();
+
+  function afterRotate(p: ShowroomProduct) {
+    if (tray.has(p.id)) tray.replace(p);
+    qc.invalidateQueries({ queryKey: ['library'] });
+  }
 
   function afterDelete(p: ShowroomProduct) {
     setOpen(null);
@@ -253,6 +259,7 @@ export function Library() {
                   onToggle={() => tray.toggle(p)}
                   onOpen={() => setOpen(p)}
                   onEdit={() => setEditing(p)}
+                  onRotated={afterRotate}
                   onDelete={async () => { await deleteProduct(p); afterDelete(p); }}
                 />
               ))}
@@ -266,12 +273,12 @@ export function Library() {
         )}
       </div>
 
-      <Tray onDone={(id) => navigate(`/links?new=${id}`)} />
+      <Tray onDone={(id) => navigate(`/links?new=${id}`)} onRotated={afterRotate} />
       {open && (
         <Detail
           product={open}
           onClose={() => setOpen(null)}
-          onChanged={(p) => { setOpen(p); qc.invalidateQueries({ queryKey: ['library'] }); }}
+          onChanged={(p) => { setOpen(p); afterRotate(p); }}
           onEdit={(p) => setEditing(p)}
           onDeleted={afterDelete}
           onOpenVariant={(p) => setOpen(p)}
@@ -408,12 +415,14 @@ function Header() {
 }
 
 function Card({
-  product, selected, onToggle, onOpen, onEdit, onDelete,
+  product, selected, onToggle, onOpen, onEdit, onDelete, onRotated,
 }: {
   product: ShowroomProduct; selected: boolean; onToggle: () => void; onOpen: () => void;
-  onEdit: () => void; onDelete: () => Promise<void>;
+  onEdit: () => void; onDelete: () => Promise<void>; onRotated: (p: ShowroomProduct) => void;
 }) {
   const hasPhoto = !!product.firebaseUrl;
+  const hero = heroImage(product);
+  const turn = useRotate(product, hero, onRotated);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -439,8 +448,8 @@ function Card({
         {/* The image opens the detail. The checkbox selects. Two jobs, two targets. */}
         <button onClick={onOpen} className="block h-full w-full" aria-label={`Open ${product.displayName}`}>
           {hasPhoto ? (
-            <img src={thumb(heroImage(product), 420)} alt={product.displayName} loading="lazy"
-              className="h-full w-full object-cover" />
+            <img src={thumb(hero, 420)} alt={product.displayName} loading="lazy"
+              style={turn.style} className="h-full w-full object-cover" />
           ) : (
             <span className="flex h-full w-full items-center justify-center text-[11px] text-neutral-400">
               No photo
@@ -464,7 +473,14 @@ function Card({
         </button>
 
         {/* Always visible on touch screens, on hover with a mouse. */}
-        <div className="absolute right-2 top-2 flex gap-1.5 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
+        <div className={
+          'absolute right-2 top-2 flex gap-1.5 transition-opacity ' +
+          (turn.busy ? 'opacity-100' : 'opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100')
+        }>
+          {hasPhoto && (
+            <RotateButton onClick={turn.rotate} busy={turn.busy} label="Turn the main photo 90° clockwise"
+              className={iconCls + ' text-neutral-600 hover:text-[#2F4C69] disabled:text-[#2F4C69]'} />
+          )}
           <button onClick={(e) => { e.stopPropagation(); onEdit(); }}
             aria-label={`Edit ${product.displayName}`} title="Edit"
             className={iconCls + ' text-neutral-600 hover:text-[#2F4C69]'}>
@@ -476,6 +492,12 @@ function Card({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
+
+        {turn.error && (
+          <p role="alert" className="absolute inset-x-0 bottom-0 bg-red-700/90 px-2 py-1 text-[11px] text-white">
+            {turn.error}
+          </p>
+        )}
 
         {confirming && (
           <div role="alertdialog" aria-label={`Delete ${product.displayName}?`}
@@ -532,7 +554,18 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpen
   const selected = tray.has(product.id);
   const [shot, setShot] = useState(heroImage(product));
   // Follow the hero when the product is replaced after an edit.
-  useEffect(() => { setShot(heroImage(product)); }, [product]);
+  // Keep the photo being viewed when the design saves (a reorder or a turn);
+  // a turned photo has a new address, so follow it by its position.
+  const shotAt = useRef(-1);
+  useEffect(() => {
+    const g = orderedImages(product);
+    setShot((s) => (g.includes(s) ? s : g[shotAt.current] || heroImage(product)));
+    shotAt.current = -1;
+  }, [product]);
+  const turn = useRotate(product, shot, (p) => {
+    shotAt.current = orderedImages(product).indexOf(shot);
+    onChanged?.(p);
+  });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -589,9 +622,16 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpen
 
         <div className="grid gap-7 p-6 sm:grid-cols-[1.2fr_1fr]">
           <div>
-            <div className="aspect-[4/5] overflow-hidden rounded-sm bg-neutral-100">
+            <div className="relative aspect-[4/5] overflow-hidden rounded-sm bg-neutral-100">
               {shot ? (
-                <img src={thumb(shot, 900)} alt={product.displayName} className="h-full w-full object-cover" />
+                <>
+                  <img src={thumb(shot, 900)} alt={product.displayName} style={turn.style} className="h-full w-full object-cover" />
+                  <RotateButton onClick={turn.rotate} busy={turn.busy} label="Turn this photo 90° clockwise"
+                    className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-neutral-700 shadow-[0_1px_3px_rgba(0,0,0,0.2)] hover:text-[#2F4C69] [&_svg]:h-4 [&_svg]:w-4" />
+                  {turn.error && (
+                    <p role="alert" className="absolute inset-x-0 bottom-0 bg-red-700/90 px-3 py-1.5 text-[12px] text-white">{turn.error}</p>
+                  )}
+                </>
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-neutral-400">No photo yet</div>
               )}
@@ -742,9 +782,10 @@ function Row({ k, v }: { k: string; v?: string }) {
   );
 }
 
-function Tray({ onDone }: { onDone: (id: string) => void }) {
+function Tray({ onDone, onRotated }: { onDone: (id: string) => void; onRotated: (p: ShowroomProduct) => void }) {
   const tray = useSelection();
   const [busy, setBusy] = useState<'link' | null>(null);
+  const [turning, setTurning] = useState<{ done: number; total: number; failed: number } | null>(null);
   const [pptOpen, setPptOpen] = useState(false);
   const [asking, setAsking] = useState(false);
   const [buyer, setBuyer] = useState('');
@@ -760,6 +801,19 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
   }
 
   const noPhotos = tray.items.filter((p) => !p.firebaseUrl).length;
+
+  // One at a time: each is a download, a turn and an upload of a large photo.
+  async function rotateMains() {
+    const list = tray.items.filter((p) => p.firebaseUrl);
+    let failed = 0;
+    setTurning({ done: 0, total: list.length, failed: 0 });
+    for (let i = 0; i < list.length; i++) {
+      try { onRotated(await rotatePhoto(list[i], heroImage(list[i]), 1)); }
+      catch { failed++; }
+      setTurning({ done: i + 1, total: list.length, failed });
+    }
+    setTimeout(() => setTurning(null), failed ? 6000 : 2500);
+  }
 
   async function makeLink() {
     if (!buyer.trim()) return setError('Type who this is for.');
@@ -813,6 +867,21 @@ function Tray({ onDone }: { onDone: (id: string) => void }) {
           </>
         ) : (
           <>
+            {turning ? (
+              <span className="text-[12.5px] text-neutral-500" role="status">
+                {turning.done < turning.total
+                  ? `Turning ${turning.done + 1} of ${turning.total}…`
+                  : turning.failed
+                    ? `${turning.failed} could not be turned. The rest are done.`
+                    : `Turned ${turning.total}. Click again to keep turning.`}
+              </span>
+            ) : null}
+            <button onClick={rotateMains} disabled={busy !== null || (!!turning && turning.done < turning.total) || tray.count === noPhotos}
+              title="Turn the main photo of every selected design 90° clockwise"
+              className="flex items-center gap-2 rounded-sm border border-neutral-200 px-[14px] py-2.5 text-[13px] font-semibold hover:border-neutral-400 disabled:opacity-60">
+              <RotateCw className={'h-3.5 w-3.5 ' + (turning && turning.done < turning.total ? 'animate-spin' : '')} />
+              Rotate main photo
+            </button>
             <button onClick={() => { setError(''); setPptOpen(true); }} disabled={busy !== null}
               className="rounded-sm border border-neutral-200 px-[18px] py-2.5 text-[13px] font-semibold hover:border-neutral-400 disabled:opacity-60">
               Download PPT
