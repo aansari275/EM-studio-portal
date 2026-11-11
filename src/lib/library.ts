@@ -2,6 +2,7 @@ import {
   collection, query, where, orderBy, limit as qlimit, getDocs, doc, getDoc,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { parseSlideLayout } from './deckSlots';
 import {
   getShowroomProducts, searchShowroomProducts, searchShowroomPage, getDesignVariants,
   type ShowroomProduct,
@@ -111,6 +112,7 @@ function mapEm(id: string, d: any): ShowroomProduct {
     tags: [],
     deleted: !!d.deletedAt,
     heroPinned: !!d.heroPinned,
+    slideLayout: parseSlideLayout(d.slideLayout),
   };
 }
 

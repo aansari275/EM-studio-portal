@@ -1,5 +1,5 @@
 import pptxgen from 'pptxgenjs';
-import { PHOTO_SLOTS, type Box } from './deckSlots';
+import { photoSlotsFor, fitContain, type Box } from './deckSlots';
 import { orderedImages } from './img';
 import type { ShowroomProduct } from './firebase';
 import type { DeckImages } from './deckImages';
@@ -126,8 +126,9 @@ export async function buildPptxBlob(
 
 
 // The house product slide, shared with the slot diagram in the preview.
-// Do not "improve" these; see deckSlots.ts and addProductSlide.
-const [PRIMARY, ...REST] = PHOTO_SLOTS;
+// Do not "improve" these; see deckSlots.ts and addProductSlide. A record with
+// its own `slideLayout` (moved or resized in the preview) uses that instead,
+// through photoSlotsFor(), the same function the preview draws with.
 
 /**
  * Every photo the deck will use and the slot it lands in, in inches. Photos
@@ -142,7 +143,7 @@ export function deckPhotoSlots(
   return products.flatMap((p) => {
     const all = orderedImages(p);
     if (layout === 'grid') return all.slice(0, 1).map((url) => ({ url, w: GRID[0].w, h: GRID[0].h }));
-    const slots = [PRIMARY, ...REST];
+    const slots = photoSlotsFor(p.slideLayout);
     return all
       .slice(0, extraPhotos ? undefined : 4)
       .map((url, i) => ({ url, w: (slots[i] || GRID[0]).w, h: (slots[i] || GRID[0]).h }));
@@ -168,11 +169,9 @@ function placeImage(
   }
   const img = IMAGES.get(src);
   if (!img) return false;
-  const s = Math.min(box.w / img.w, box.h / img.h);
-  const w = img.w * s;
-  const h = img.h * s;
-  const y = valign === 'bottom' ? box.y + box.h - h : box.y + (box.h - h) / 2;
-  slide.addImage({ data: img.data, x: box.x + (box.w - w) / 2, y, w, h });
+  // Same maths the preview draws with (deckSlots.ts), so the slide matches it.
+  const fit = fitContain(box, img.w, img.h, valign);
+  slide.addImage({ data: img.data, ...fit });
   return true;
 }
 
@@ -390,6 +389,8 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   // Hero first. firebaseUrl is a numbered detail frame on ~68% of products, so
   // using it as images[0] put a corner close-up in the big slot.
   const images: string[] = orderedImages(product);
+  // The house boxes, or this record's own layout from the preview.
+  const [PRIMARY, ...REST] = photoSlotsFor(product.slideLayout);
 
   // === TOP RIGHT: EM logo, on every slide ===
   // The slot in the house deck is 1.674 x 1.323 (the old stacked mark). The
@@ -400,7 +401,7 @@ function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
   // === PRIMARY: tall portrait down the left ===
   if (!placeImage(slide, images[0], PRIMARY)) {
     slide.addShape('rect', { ...PRIMARY, fill: { color: 'F5F5F5' } });
-    slide.addText('No Image', { x: 0.121, y: 3.5, w: 5.086, h: 0.5, fontSize: 16,
+    slide.addText('No Image', { x: PRIMARY.x, y: product.slideLayout ? PRIMARY.y + PRIMARY.h / 2 - 0.25 : 3.5, w: PRIMARY.w, h: 0.5, fontSize: 16,
       fontFace: FONTS.main, color: COLORS.gray, align: 'center' });
   }
 

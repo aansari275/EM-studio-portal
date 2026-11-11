@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { fixStorageUrl } from './img';
+import { parseSlideLayout, type SlideLayout } from './deckSlots';
 import {
   getFirestore,
   collection,
@@ -623,6 +624,9 @@ export interface ShowroomProduct {
   heroPinned?: boolean;
   /** Soft deleted from the studio. Hidden from the library, kept in the data. */
   deleted?: boolean;
+  /** This record's own photo boxes on its deck slide, set in the preview.
+   *  Absent means the house layout. See deckSlots.ts. */
+  slideLayout?: SlideLayout;
 }
 
 export interface DesignGroup {
@@ -843,6 +847,7 @@ export function mapShowroomData(id: string, data: any): ShowroomProduct {
     tags: data.tags || [],
     heroPinned: !!data.heroPinned,
     deleted: !!data.deletedAt,
+    slideLayout: parseSlideLayout(data.slideLayout),
   };
 }
 

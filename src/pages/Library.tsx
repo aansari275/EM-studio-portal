@@ -21,6 +21,7 @@ import { NewProduct, type NewProductInitial } from '../components/NewProduct';
 import { PhotoDrop } from '../components/PhotoDrop';
 import { PhotoOrder } from '../components/PhotoOrder';
 import { SlidePreview } from '../components/SlidePreview';
+import type { SlideLayout } from '../lib/deckSlots';
 import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
@@ -64,6 +65,17 @@ export function Library() {
   function afterRotate(p: ShowroomProduct) {
     if (tray.has(p.id)) tray.replace(p);
     qc.invalidateQueries({ queryKey: ['library'] });
+  }
+
+  // A slide layout saved from the preview. Merged into the copies on screen
+  // and in the tray rather than replacing them, so a photo reorder saved in
+  // the meantime is not undone by an older copy.
+  function afterLayout(id: string, slideLayout: SlideLayout | undefined) {
+    setOpen((cur) => (cur && cur.id === id ? { ...cur, slideLayout } : cur));
+    const inTray = tray.items.find((x) => x.id === id);
+    if (inTray) tray.replace({ ...inTray, slideLayout });
+    qc.invalidateQueries({ queryKey: ['library'] });
+    qc.invalidateQueries({ queryKey: ['variants'] });
   }
 
   function afterDelete(p: ShowroomProduct) {
@@ -279,6 +291,7 @@ export function Library() {
           product={open}
           onClose={() => setOpen(null)}
           onChanged={(p) => { setOpen(p); afterRotate(p); }}
+          onLayoutSaved={afterLayout}
           onEdit={(p) => setEditing(p)}
           onDeleted={afterDelete}
           onOpenVariant={(p) => setOpen(p)}
@@ -542,8 +555,9 @@ function Card({
   );
 }
 
-function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpenVariant, onAddVariant }: {
+function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, onDeleted, onOpenVariant, onAddVariant }: {
   product: ShowroomProduct; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
+  onLayoutSaved?: (id: string, layout: SlideLayout | undefined) => void;
   onCopy?: (p: ShowroomProduct) => void;
   onOpenVariant?: (p: ShowroomProduct) => void;
   onAddVariant?: (p: ShowroomProduct) => void;
@@ -641,7 +655,7 @@ function Detail({ product, onClose, onChanged, onCopy, onEdit, onDeleted, onOpen
                 onSaved={(p) => onChanged?.(p)} />
               <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
             </div>
-            <SlidePreview photos={gallery} onPick={setShot} />
+            <SlidePreview product={product} photos={gallery} onPick={setShot} onLayoutSaved={onLayoutSaved} />
           </div>
 
           <div>

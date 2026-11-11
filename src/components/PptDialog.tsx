@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db, type ShowroomProduct } from '../lib/firebase';
 import { currentUserUid } from '../lib/auth';
 import { orderedImages } from '../lib/img';
+import { withFreshSlideLayouts } from '../lib/productEdit';
 import { buildPptxBlob, deckFileName, deckPhotoSlots, type DeckLayout } from '../lib/pptGenerator';
 import { loadDeckImages, FULL, EMAIL_STEPS, EMAIL_LIMIT, type Quality } from '../lib/deckImages';
 
@@ -96,12 +97,17 @@ export default function PptDialog({
   const slots = useMemo(() => deckPhotoSlots(products, { layout, extraPhotos }), [products, layout, extraPhotos]);
 
   async function build(quality: Quality, label: string): Promise<Blob> {
+    setStep({ kind: 'working', label: 'Reading slide layouts' });
+    // Each rug's own photo boxes, as saved now, not as they were when ticked.
+    // Photos are fetched at the size of the box they land in.
+    const deckProducts = layout === 'single' ? await withFreshSlideLayouts(products) : products;
+    const slots = deckPhotoSlots(deckProducts, { layout, extraPhotos });
     setStep({ kind: 'working', label, done: 0, total: slots.length });
     const images = await loadDeckImages(slots, quality, (done, total) =>
       setStep({ kind: 'working', label, done, total })
     );
     setStep({ kind: 'working', label: 'Putting the slides together' });
-    return buildPptxBlob(products, title, { images, layout, extraPhotos });
+    return buildPptxBlob(deckProducts, title, { images, layout, extraPhotos });
   }
 
   async function run(fn: () => Promise<void>) {

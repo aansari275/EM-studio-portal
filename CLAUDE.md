@@ -301,3 +301,11 @@ netlify deploy --prod
   turned in a canvas and saved as a NEW file `<name>-r<timestamp>.jpg` in the same folder,
   then the record points at it, so decks, buyer links and other apps need no change and
   the old file stays. Clicks within 0.9 s are batched into one save.
+
+## Per-record slide layout (11 Nov 2026)
+
+- In the preview's "On the deck slide" diagram each photo box can be dragged (move), pulled by a corner (resize), nudged with arrow keys (Shift = 0.5in, corners are focusable handles), trimmed with "Fit box N to its photo" (or double-click), and put back with "Reset to default layout".
+- Saved on **that record only** as `slideLayout` `{ v: 1, slots: [{x,y,w,h}] x4, updatedAt, updatedBy }`, fractions of the slide. A colourway is its own record, so it gets its own layout; there is no fallback from colourway to design (the boxes are tuned to that record's photo shapes, and a fallback would silently change colourway decks). No field = `PHOTO_SLOTS`, so untouched records export exactly as before (verified: identical slide XML and media).
+- One geometry path: `photoSlotsFor()` and `fitContain()` in `deckSlots.ts`, used by `SlidePreview.tsx` and `pptGenerator.ts`. Photos are contained (whole, centred) in both. `constrainBox()` keeps boxes on the slide, at least 0.6in, and out of `RESERVED` (logo + spec text, top right). Overlap between photo boxes is allowed; stacking order is photo 1..4 in both.
+- Writes go through `productEdit.ts` (`saveSlideLayout`, same doc as the other edits, only the `slideLayout` field, top-level `updatedAt` untouched). 1.5 s debounce. On pagehide / hidden tab, `saveSlideLayoutOnExit` PATCHes the Firestore REST API with `keepalive` and the user's ID token, because an SDK write is dropped when the page unloads (measured).
+- `PptDialog` re-reads each rug's `slideLayout` before building (`withFreshSlideLayouts`), because tray copies are snapshots. The grid deck, buyer links (`/c/<id>`, hero only) and the server-side `build_deck.py` (outside this repo) do not use the slide layout.

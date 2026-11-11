@@ -1,8 +1,10 @@
 import { doc, getDoc, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, invalidateShowroomCache, mapShowroomData, styleSlug, deriveBaseStyle, type ShowroomProduct } from './firebase';
-import { currentUserEmail } from './auth';
+import { currentUserEmail, auth } from './auth';
+import { onIdTokenChanged } from 'firebase/auth';
 import { orderedImages } from './img';
+import { parseSlideLayout, toFrac, isDefaultSlots, type Box, type SlideLayout } from './deckSlots';
 
 /**
  * Editing and deleting a design from the library.
@@ -221,4 +223,101 @@ export async function rotatePhoto(p: ShowroomProduct, url: string, quarterTurns:
   const next = [...photos];
   next[at] = fresh;
   return reorderPhotos(p, next);
+}
+
+/**
+ * Save this record's own photo boxes for its deck slide (moved or resized in
+ * the preview), or clear them with `null` to go back to the house layout.
+ * Only `slideLayout` is written, through the same document the other edits
+ * use, so the record's other fields, its updatedAt and the shared template
+ * are untouched. Boxes that equal the house layout are stored as no layout.
+ */
+export async function saveSlideLayout(p: ShowroomProduct, boxes: Box[] | null): Promise<ShowroomProduct> {
+  const r = isArchive(p) ? archiveRef(p) : showroomRef(p);
+  if (!boxes || isDefaultSlots(boxes)) {
+    await updateDoc(r, { slideLayout: deleteField() });
+    if (!isArchive(p)) invalidateShowroomCache();
+    return { ...p, slideLayout: undefined };
+  }
+  const layout: SlideLayout = {
+    v: 1,
+    slots: boxes.map(toFrac),
+    updatedAt: new Date().toISOString(),
+    updatedBy: currentUserEmail() || 'studio',
+  };
+  await updateDoc(r, { slideLayout: layout });
+  if (!isArchive(p)) invalidateShowroomCache();
+  return { ...p, slideLayout: layout };
+}
+
+// The signed-in user's ID token, kept current so a write can be sent while
+// the page is closing, when there is no time to fetch one.
+let idToken = '';
+onIdTokenChanged(auth, (u) => {
+  if (!u) { idToken = ''; return; }
+  u.getIdToken().then((t) => { idToken = t; }).catch(() => {});
+});
+
+/**
+ * saveSlideLayout for a page that is closing. The Firestore SDK's write is
+ * dropped when the page unloads mid-send, so this goes straight to the
+ * Firestore REST API with `keepalive`, which the browser finishes after the
+ * page is gone. Same document, same single field as saveSlideLayout.
+ */
+export function saveSlideLayoutOnExit(p: ShowroomProduct, boxes: Box[] | null): SlideLayout | undefined {
+  const { apiKey, projectId } = db.app.options;
+  const path = isArchive(p) ? `em_products/${p.id.slice(3)}` : `showroom_products/${p.id}`;
+  const layout: SlideLayout | undefined = !boxes || isDefaultSlots(boxes) ? undefined : {
+    v: 1,
+    slots: boxes.map(toFrac),
+    updatedAt: new Date().toISOString(),
+    updatedBy: currentUserEmail() || 'studio',
+  };
+  const num = (n: number) => ({ doubleValue: n });
+  const body = layout ? {
+    fields: {
+      slideLayout: {
+        mapValue: {
+          fields: {
+            v: { integerValue: '1' },
+            slots: { arrayValue: { values: layout.slots.map((b) => ({ mapValue: { fields: { x: num(b.x), y: num(b.y), w: num(b.w), h: num(b.h) } } })) } },
+            updatedAt: { stringValue: layout.updatedAt },
+            updatedBy: { stringValue: layout.updatedBy },
+          },
+        },
+      },
+    },
+  } : { fields: {} }; // slideLayout in the mask but not the body: the field is removed
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${path}`
+    + `?updateMask.fieldPaths=slideLayout&currentDocument.exists=true&key=${apiKey}`;
+  try {
+    void fetch(url, {
+      method: 'PATCH',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+  } catch {
+    /* nothing more can be done while the page closes */
+  }
+  if (!isArchive(p)) invalidateShowroomCache();
+  return layout;
+}
+
+/**
+ * The latest saved slide layout of each record, read fresh before a deck is
+ * built. The selection tray keeps copies from when a rug was ticked, so a
+ * layout changed since then would otherwise be missed. A read that fails
+ * keeps the copy it has rather than stopping the deck.
+ */
+export async function withFreshSlideLayouts(products: ShowroomProduct[]): Promise<ShowroomProduct[]> {
+  return Promise.all(products.map(async (p) => {
+    try {
+      const snap = await getDoc(isArchive(p) ? archiveRef(p) : showroomRef(p));
+      if (!snap.exists()) return p;
+      return { ...p, slideLayout: parseSlideLayout(snap.data()?.slideLayout) };
+    } catch {
+      return p;
+    }
+  }));
 }
