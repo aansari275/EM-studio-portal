@@ -4,7 +4,6 @@ import { db, storage, invalidateShowroomCache, mapShowroomData, styleSlug, deriv
 import { currentUserEmail, auth } from './auth';
 import { onIdTokenChanged } from 'firebase/auth';
 import { orderedImages } from './img';
-import { rotateBlob } from './canvasImage';
 import { parseSlideLayout, toFrac, isDefaultSlots, type Box, type SlideLayout } from './deckSlots';
 
 /**
@@ -197,6 +196,7 @@ export async function rotatePhoto(p: ShowroomProduct, url: string, quarterTurns:
   if (!res.ok) throw new Error('Could not load the photo to turn it.');
   // Same ceiling as uploads: nothing downstream needs more than ~2000px.
   // A cutout keeps its transparency and is saved as PNG, anything else as JPEG.
+  const { rotateBlob } = await import('./canvasImage');
   const turned = await rotateBlob(await res.blob(), turns, 2000);
 
   const folder = (p.id && !p.id.startsWith('em:') ? p.id : '') || styleSlug(p.styleNumber || p.baseStyleNumber || '');
