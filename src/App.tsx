@@ -10,6 +10,8 @@ const StudioDashboard = lazy(() => import('./pages/StudioDashboard').then((m) =>
 const UploadPhotos = lazy(() => import('./pages/UploadPhotos').then((m) => ({ default: m.UploadPhotos })));
 const RugGallery = lazy(() => import('./pages/RugGallery').then((m) => ({ default: m.RugGallery })));
 const RugGalleryDetail = lazy(() => import('./pages/RugGallery').then((m) => ({ default: m.RugGalleryDetail })));
+const StudioEntries = lazy(() => import('./pages/StudioEntries').then((m) => ({ default: m.StudioEntries })));
+const BackgroundRemoval = lazy(() => import('./pages/BackgroundRemoval').then((m) => ({ default: m.BackgroundRemoval })));
 const AdminMigrate = lazy(() => import('./pages/AdminMigrate').then((m) => ({ default: m.AdminMigrate })));
 
 /**
@@ -22,6 +24,9 @@ function App() {
       <Route path="/" element={<Library />} />
       <Route path="/links" element={<MyLinks />} />
       <Route path="/more" element={<More />} />
+      <Route path="/custom-rugs" element={<StudioEntries key="custom-rug" kind="custom-rug" />} />
+      <Route path="/sample-dispatch" element={<StudioEntries key="sample-dispatch" kind="sample-dispatch" />} />
+      <Route path="/background-removal" element={<BackgroundRemoval />} />
 
       {/* the older workflows, now reached from More */}
       <Route path="/dispatches" element={<StudioDashboard initialTab="dispatches" />} />
