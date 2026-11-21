@@ -4,6 +4,7 @@ import { db, storage, invalidateShowroomCache, mapShowroomData, styleSlug, deriv
 import { currentUserEmail, auth } from './auth';
 import { onIdTokenChanged } from 'firebase/auth';
 import { orderedImages } from './img';
+import { rotateBlob } from './canvasImage';
 import { parseSlideLayout, toFrac, isDefaultSlots, type Box, type SlideLayout } from './deckSlots';
 
 /**
@@ -194,30 +195,16 @@ export async function rotatePhoto(p: ShowroomProduct, url: string, quarterTurns:
 
   const res = await fetch(url);
   if (!res.ok) throw new Error('Could not load the photo to turn it.');
-  const bmp = await createImageBitmap(await res.blob());
   // Same ceiling as uploads: nothing downstream needs more than ~2000px.
-  const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
-  const w = Math.round(bmp.width * scale);
-  const h = Math.round(bmp.height * scale);
-  const side = turns % 2 === 1;
-  const canvas = document.createElement('canvas');
-  canvas.width = side ? h : w;
-  canvas.height = side ? w : h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('This browser cannot turn photos.');
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  ctx.rotate((turns * Math.PI) / 2);
-  ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
-  bmp.close();
-  const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, 'image/jpeg', 0.92));
-  if (!blob) throw new Error('Could not save the turned photo.');
+  // A cutout keeps its transparency and is saved as PNG, anything else as JPEG.
+  const turned = await rotateBlob(await res.blob(), turns, 2000);
 
   const folder = (p.id && !p.id.startsWith('em:') ? p.id : '') || styleSlug(p.styleNumber || p.baseStyleNumber || '');
   if (!folder) throw new Error('This design has no style number, so there is nowhere to file the photo.');
   const base = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'photo')
     .split('/').pop()!.replace(/\.[a-z0-9]+$/i, '').replace(/-r\d+$/, '');
-  const sref = ref(storage, `products/${folder}/${base}-r${Date.now()}.jpg`);
-  await uploadBytes(sref, blob, { contentType: 'image/jpeg' });
+  const sref = ref(storage, `products/${folder}/${base}-r${Date.now()}.${turned.ext}`);
+  await uploadBytes(sref, turned.blob, { contentType: turned.type });
   const fresh = await getDownloadURL(sref);
 
   const next = [...photos];
