@@ -50,3 +50,23 @@ export async function addStudioOption(kind: OptionKind, value: string): Promise<
   if (!v) return;
   await setDoc(REF(), { [kind]: arrayUnion(v) }, { merge: true });
 }
+
+/**
+ * Customers the studio typed in with "+ Add new" on Custom Rugs and Sample
+ * Dispatch. Saved beside the other choices, read by everyone.
+ */
+export async function getSavedCustomers(): Promise<string[]> {
+  try {
+    const data = (await getDoc(REF())).data() as { customers?: unknown[] } | undefined;
+    const list = data?.customers || [];
+    return list.filter((v): v is string => typeof v === 'string' && !!v.trim());
+  } catch {
+    return [];
+  }
+}
+
+export async function addStudioCustomer(name: string): Promise<void> {
+  const v = name.trim();
+  if (!v) return;
+  await setDoc(REF(), { customers: arrayUnion(v) }, { merge: true });
+}
