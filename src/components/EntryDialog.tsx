@@ -135,7 +135,7 @@ export function EntryDialog({
         <div className="space-y-6 px-6 py-6">
           {!isNew && photos.length > 0 && (
             <div>
-              <div className="relative grid aspect-[4/3] place-items-center overflow-hidden rounded-sm bg-[conic-gradient(#f3f3f3_0_25%,#fff_0_50%,#f3f3f3_0_75%,#fff_0)] bg-[length:16px_16px]">
+              <div className="relative grid h-[min(56vh,520px)] place-items-center overflow-hidden rounded-sm bg-[conic-gradient(#f3f3f3_0_25%,#fff_0_50%,#f3f3f3_0_75%,#fff_0)] bg-[length:16px_16px]">
                 {big && <img src={big.url} alt={`Photo ${viewing + 1} of ${photos.length}`} className="max-h-full max-w-full object-contain" />}
                 {photos.length > 1 && (
                   <>

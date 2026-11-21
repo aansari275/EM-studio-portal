@@ -262,7 +262,7 @@ netlify deploy --prod
 
 ## PPT photo sizing and the 25 MB check (2 Oct 2026)
 
-- **Nothing is compressed at upload.** Originals stay the archive. Each deck fetches its own copies through the Netlify Image CDN (`src/lib/deckImages.ts`), sized **per slot** at 300 pixels per inch (`deckPhotoSlots` in `pptGenerator.ts`), with `fit=contain` so the whole rug is kept.
+- **Library uploads are compressed** (`addProductPhotos`: `browser-image-compression`, 2000px, 2 MB), so the stored files are not the studio originals. (This line used to say nothing was compressed; that stopped being true.) Each deck fetches its own copies through the Netlify Image CDN (`src/lib/deckImages.ts`), sized **per slot** at 300 pixels per inch (`deckPhotoSlots` in `pptGenerator.ts`), with `fit=contain` so the whole rug is kept.
 - Measured on real products: 6 rugs with all 101 photos was **65 MB** at a flat 1600px, **19.6 MB** per slot. 24 rugs on grid slides 5.3 MB. 3 rugs, 4 photos 5.1 MB (was 67 MB with originals).
 - **`em-logo-icon.png` was 6300px, 312 KB, and pptxgenjs embeds it once per slide**: 6.5 MB of a 26 MB deck. Cut to 800x300, 7 KB. Keep every asset that goes on every slide small.
 - Photos are fitted inside their slot from their real pixel size, no stretching. The house slot positions are unchanged.
@@ -309,3 +309,14 @@ netlify deploy --prod
 - One geometry path: `photoSlotsFor()` and `fitContain()` in `deckSlots.ts`, used by `SlidePreview.tsx` and `pptGenerator.ts`. Photos are contained (whole, centred) in both. `constrainBox()` keeps boxes on the slide, at least 0.6in, and out of `RESERVED` (logo + spec text, top right). Overlap between photo boxes is allowed; stacking order is photo 1..4 in both.
 - Writes go through `productEdit.ts` (`saveSlideLayout`, same doc as the other edits, only the `slideLayout` field, top-level `updatedAt` untouched). 1.5 s debounce. On pagehide / hidden tab, `saveSlideLayoutOnExit` PATCHes the Firestore REST API with `keepalive` and the user's ID token, because an SDK write is dropped when the page unloads (measured).
 - `PptDialog` re-reads each rug's `slideLayout` before building (`withFreshSlideLayouts`), because tray copies are snapshots. The grid deck, buyer links (`/c/<id>`, hero only) and the server-side `build_deck.py` (outside this repo) do not use the slide layout.
+
+## Custom Rugs, Sample Dispatch, Background Removal, photo editor (21 Nov 2026)
+
+Spec: `docs/superpowers/specs/2026-11-21-custom-rugs-dispatch-bg-editor-design.md`.
+
+- **Header** is `components/AppHeader.tsx`, shared by Library and the three new pages; menu button under `md`.
+- **Photo editor** (`components/PhotoEditor.tsx`, UI only; maths in `lib/photoEdit.ts`, pure, unit tested with `npm test`; canvas glue in `lib/canvasImage.ts`). Opens from any `PhotoPicker` tile. Fix skew (homography + bilinear on premultiplied alpha), straighten, crop, levels with Auto, brightness, contrast, saturation, warmth. All geometry is one output-to-source matrix, so every pixel is sampled once. Preview ~1000px, Apply up to 2000px, PNG if any pixel is transparent, else JPEG 0.92. The tile keeps `original`, so undo restores it.
+- **Background Removal** (`/background-removal`): local only, nothing saved. Per tile download and a zip (`lib/download.ts`, `fflate`, lazy).
+- **Custom Rugs / Sample Dispatch** (`/custom-rugs`, `/sample-dispatch`, one page `pages/StudioEntries.tsx`): collections `studio_custom_rugs` / `studio_sample_dispatches`, files under `studio-portal/custom-rugs|sample-dispatches/{entryId}/`. All calls in `lib/studioEntries.ts`. Soft delete only (`deleted: true`). Listing uses one equality filter (`deleted == false`) and sorts in memory, so no composite index. Customers = Orders app `buyers` (read only; only an explicit `isActive: false` hides one) plus `config/studio_options.customers`. Not related to the Orders app `sample_dispatches_to_buyers`, which More now labels Dispatch photos (Orders app).
+- **Rotate keeps transparency**: `rotatePhoto` saves PNG when the turned image has alpha (it used to save a black-backed JPEG).
+- **Background removal does not work under `vite dev`**: onnxruntime-web's wasm is answered with index.html (MIME error). It works in a production build (`vite build && vite preview`) and on the live site. Pre-existing, unrelated to the editor.
