@@ -7,8 +7,8 @@ import { Link } from 'react-router-dom';
 const ITEMS = [
   {
     to: '/dispatches',
-    title: 'Sample Dispatches',
-    blurb: 'Photograph samples going out to a buyer. Feeds the Orders app.',
+    title: 'Dispatch photos (Orders app)',
+    blurb: 'Photograph samples going out to a buyer for an Orders app dispatch. Feeds the Orders app.',
   },
   {
     to: '/sample-bazar',

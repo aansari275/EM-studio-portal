@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Search, Check, X, Plus, Copy, Pencil, Trash2, RotateCw } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
@@ -14,7 +14,8 @@ import {
 import { useSelection } from '../lib/selection';
 const PptDialog = lazy(() => import('../components/PptDialog'));
 import { createCatalog, catalogUrl, EXPIRY_CHOICES } from '../lib/catalogs';
-import { signOutUser, currentUserEmail } from '../lib/auth';
+import { currentUserEmail } from '../lib/auth';
+import { AppHeader } from '../components/AppHeader';
 import { thumb, heroImage, orderedImages } from '../lib/img';
 import { canonicalConstruction } from '../lib/library';
 import { NewProduct, type NewProductInitial } from '../components/NewProduct';
@@ -174,7 +175,7 @@ export function Library() {
 
   return (
     <div className="flex min-h-screen flex-col bg-white text-neutral-900">
-      <Header />
+      <AppHeader />
 
       <div className="mx-auto w-full max-w-[1400px] px-7">
         <label
@@ -404,26 +405,6 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
     >
       {children}
     </button>
-  );
-}
-
-function Header() {
-  const email = currentUserEmail();
-  return (
-    <header className="mx-auto flex w-full max-w-[1400px] flex-wrap items-center gap-4 px-7 pt-6">
-      <div className="font-serif text-[17px]">
-        Eastern Mills
-        <span className="ml-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-neutral-400">
-          Studio
-        </span>
-      </div>
-      <div className="flex-1" />
-      <Link to="/links" className="text-[13px] text-neutral-500 hover:text-neutral-900">My links</Link>
-      <Link to="/more" className="text-[13px] text-neutral-500 hover:text-neutral-900">More</Link>
-      <button onClick={() => signOutUser()} title={email || undefined} className="text-[13px] text-neutral-400 hover:text-neutral-900">
-        Sign out
-      </button>
-    </header>
   );
 }
 
