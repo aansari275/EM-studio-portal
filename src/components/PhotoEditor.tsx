@@ -10,7 +10,7 @@ import { jpegFocal35 } from '../lib/imageFormat';
 import { decontaminate } from '../lib/maskRefine';
 import { useTabActive } from '../lib/tabContext';
 import { SizePanel } from './PhotoEditorSize';
-import { ratioText, estimateNote } from '../lib/rugSize';
+import { EMPTY_SIZE, ratioText, estimateNote, type SizeFields } from '../lib/rugSize';
 
 /**
  * The photo editor: fix skew, straighten, crop and tone, in a modal.
@@ -69,6 +69,7 @@ export default function PhotoEditor({
   /** What Auto last used, shown under Levels. */
   const [autoNote, setAutoNote] = useState('');
   const [autoBusy, setAutoBusy] = useState(false);
+  const [sizeFields, setSizeFields] = useState<SizeFields>(EMPTY_SIZE);
   const dialog = useRef<HTMLDivElement>(null);
 
   // Decode once. The bitmap is kept for the full size render on Apply.
@@ -319,7 +320,7 @@ export default function PhotoEditor({
 
               {tool === 'size' && info && (
                 <SizePanel settings={settings} info={info} hasSkew={!!settings.quad} cameraFrame={cameraFrame}
-                  outSize={outSize} onChange={(patch) => set(patch)} />
+                  outSize={outSize} fields={sizeFields} onFields={setSizeFields} onChange={(patch) => set(patch)} />
               )}
 
               {tool === 'tone' && (

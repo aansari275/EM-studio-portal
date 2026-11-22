@@ -65,3 +65,45 @@ export function estimateNote(e: AspectEstimate, cameraFrame: boolean): string {
     default: return `Taken from the side lengths.${like}`;
   }
 }
+
+export type SizeUnit = 'ft' | 'cm';
+
+/** What is typed in the Size step's Rug size fields: width (left to right), length (top to bottom). */
+export interface SizeFields { a: string; b: string; unit: SizeUnit }
+
+export const EMPTY_SIZE: SizeFields = { a: '', b: '', unit: 'ft' };
+
+const num = (v: string) => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) && n > 0 ? n : null; };
+
+/**
+ * True when both fields hold a size and the photo's shape is exactly that
+ * size (within rounding, so switching ft and cm does not count as a change).
+ */
+export function sizeApplied(f: SizeFields, shape: number | null): boolean {
+  const a = num(f.a), b = num(f.b);
+  if (a === null || b === null || !shape) return false;
+  return Math.abs(Math.log(a / b / shape)) < 0.002;
+}
+
+/**
+ * The fields as they should show. A filled-in size that no longer matches
+ * the shape (Width or Length was moved, Auto or Reset) is cleared, so the
+ * fields never claim a size the photo no longer has. A size still being
+ * typed (one field empty) is left alone.
+ */
+export function reconcileSize(f: SizeFields, shape: number | null): SizeFields {
+  if (num(f.a) === null || num(f.b) === null) return f;
+  return sizeApplied(f, shape) ? f : { ...f, a: '', b: '' };
+}
+
+/** The preset that is in use: its size is in the fields and applied. */
+export function activePreset(f: SizeFields, shape: number | null, landscape: boolean): string | null {
+  if (!sizeApplied(f, shape)) return null;
+  const k = f.unit === 'cm' ? 30.48 : 1;
+  const a = Number(f.a), b = Number(f.b);
+  const hit = PRESETS.find((p) => {
+    const [w, l] = orientSize(p, landscape);
+    return Math.abs(Number(trim(w * k)) - a) < 1e-9 && Math.abs(Number(trim(l * k)) - b) < 1e-9;
+  });
+  return hit ? hit.label : null;
+}

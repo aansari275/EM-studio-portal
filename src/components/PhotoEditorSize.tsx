@@ -3,7 +3,10 @@ import { ArrowLeftRight, Lock, Unlock } from 'lucide-react';
 import {
   MAX_STRETCH, MIN_STRETCH, NO_STRETCH, isNoStretch, type EditSettings, type Plan,
 } from '../lib/photoEdit';
-import { PRESETS, estimateNote, nearestSize, orientSize, ratioText, trim } from '../lib/rugSize';
+import {
+  PRESETS, activePreset, estimateNote, nearestSize, orientSize, ratioText, reconcileSize, trim,
+  type SizeFields, type SizeUnit,
+} from '../lib/rugSize';
 
 /**
  * The editor's Size step: width and length set separately, a rug size, and
@@ -12,39 +15,35 @@ import { PRESETS, estimateNote, nearestSize, orientSize, ratioText, trim } from 
  * other tool, and the stretch is part of the one output-to-source matrix.
  */
 
-type Unit = 'ft' | 'cm';
-
 const clampStretch = (v: number) => Math.min(MAX_STRETCH, Math.max(MIN_STRETCH, v));
 
 export function SizePanel({
-  settings, info, hasSkew, cameraFrame, outSize, onChange,
+  settings, info, hasSkew, cameraFrame, outSize, fields, onFields, onChange,
 }: {
   settings: EditSettings;
   info: Plan['info'];
   hasSkew: boolean;
   cameraFrame: boolean;
   outSize: { w: number; h: number } | null;
+  /** The Rug size fields, kept by the editor so they survive switching tools. */
+  fields: SizeFields;
+  onFields: (f: SizeFields) => void;
   onChange: (patch: Partial<EditSettings>) => void;
 }) {
   const [lock, setLock] = useState(false);
-  const [unit, setUnit] = useState<Unit>('ft');
-  const [a, setA] = useState(''); // width, left to right
-  const [b, setB] = useState(''); // length, top to bottom
   const ids = useId();
 
-  // Reset or Auto clears the rug size fields (only when a size was in use,
-  // never while she is still typing the second number).
-  const [seenShape, setSeenShape] = useState(settings.shape);
-  if (seenShape !== settings.shape) {
-    setSeenShape(settings.shape);
-    if (seenShape && !settings.shape) { setA(''); setB(''); }
-  }
+  // The fields only ever show a size the photo actually has: once Width or
+  // Length is moved (or Auto, or Reset) they are cleared and the preset is
+  // no longer marked. Picking a size again re-applies it.
+  const { a, b, unit } = reconcileSize(fields, settings.shape);
 
   const shape = (info.base * info.sx) / info.sy;
   const landscape = info.base >= 1;
+  const preset = activePreset({ a, b, unit }, settings.shape, landscape);
 
-  const setSize = (w: string, l: string) => {
-    setA(w); setB(l);
+  const setSize = (w: string, l: string, u: SizeUnit = unit) => {
+    onFields({ a: w, b: l, unit: u });
     const nw = Number(w), nl = Number(l);
     if (nw > 0 && nl > 0 && Number.isFinite(nw) && Number.isFinite(nl)) {
       onChange({ shape: nw / nl, stretch: NO_STRETCH });
@@ -57,12 +56,10 @@ export function SizePanel({
     setSize(trim(w * k), trim(l * k));
   };
 
-  const changeUnit = (u: Unit) => {
+  const changeUnit = (u: SizeUnit) => {
     if (u === unit) return;
     const k = u === 'cm' ? 30.48 : 1 / 30.48;
-    setUnit(u);
-    if (Number(a) > 0) setA(trim(Number(a) * k));
-    if (Number(b) > 0) setB(trim(Number(b) * k));
+    onFields({ unit: u, a: Number(a) > 0 ? trim(Number(a) * k) : a, b: Number(b) > 0 ? trim(Number(b) * k) : b });
   };
 
   // Moving width or length takes over from a rug size, starting from the
@@ -129,7 +126,7 @@ export function SizePanel({
           </label>
           <label>
             <span className="sr-only">Unit</span>
-            <select value={unit} onChange={(e) => changeUnit(e.target.value as Unit)}
+            <select value={unit} onChange={(e) => changeUnit(e.target.value as SizeUnit)}
               className="rounded-sm border border-neutral-200 bg-white px-1.5 py-1.5 text-[13px] outline-none focus:border-[#2F4C69]">
               <option value="ft">ft</option>
               <option value="cm">cm</option>
@@ -143,8 +140,9 @@ export function SizePanel({
         </div>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Common sizes">
           {PRESETS.map((p) => (
-            <button key={p.label} type="button" onClick={() => pick(p)}
-              className="rounded-full border border-neutral-200 px-2.5 py-1 text-[12px] hover:border-[#2F4C69] hover:text-[#2F4C69]">
+            <button key={p.label} type="button" onClick={() => pick(p)} aria-pressed={preset === p.label}
+              className={'rounded-full border px-2.5 py-1 text-[12px] hover:border-[#2F4C69] hover:text-[#2F4C69] ' +
+                (preset === p.label ? 'border-[#2F4C69] bg-[#2F4C69] font-semibold text-white hover:text-white' : 'border-neutral-200')}>
               {p.label}
             </button>
           ))}
