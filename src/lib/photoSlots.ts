@@ -13,6 +13,8 @@ export type Slot = {
   original?: File;
   /** The background has been removed (the file is a cutout). */
   cut?: boolean;
+  /** Why the cutout needs a human look (edge of the frame, see-through), shown under the tile. */
+  cutWarn?: string;
   /**
    * The file is a cutout of `original` as it came in, same framing, nothing
    * else changed. The editor then warps from the full-resolution original
@@ -107,7 +109,7 @@ export function restoreOriginal(s: Slot): Slot {
     ? { remote: s.remoteOriginal, remoteFor: s.original } : {};
   return {
     ...s, ...reuse, file: s.original, original: undefined, remoteOriginal: undefined, remoteOriginalFor: undefined,
-    cut: false, cutOfOriginal: undefined, keptPct: undefined, failed: undefined, syncError: undefined,
+    cut: false, cutOfOriginal: undefined, cutWarn: undefined, keptPct: undefined, failed: undefined, syncError: undefined,
   };
 }
 

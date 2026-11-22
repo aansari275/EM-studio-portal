@@ -7,6 +7,7 @@ import {
 } from '../lib/photoEdit';
 import { decode, encode, headOf, paint, pixelsOf, takeAlpha } from '../lib/canvasImage';
 import { jpegFocal35 } from '../lib/imageFormat';
+import { decontaminate } from '../lib/maskRefine';
 import { useTabActive } from '../lib/tabContext';
 import { SizePanel } from './PhotoEditorSize';
 import { ratioText, estimateNote } from '../lib/rugSize';
@@ -166,7 +167,13 @@ export default function PhotoEditor({
       const steps = sampleSteps(p);
       const k = Math.min(1, WORK_MAX / Math.max(natW, natH), 1 / Math.max(steps.min, 1e-6));
       const work = pixelsOf(src, Math.max(natW, natH) * k);
-      if (full && preview && hasAlpha(preview)) takeAlpha(work, bmp);
+      if (full && preview && hasAlpha(preview)) {
+        // The cutout's refined mask (made at its own size, up to 2000px) goes
+        // onto the full-resolution photo, smoothly scaled; then the edge
+        // pixels take the rug's colour again, as they do in the cutout.
+        takeAlpha(work, bmp);
+        decontaminate(work.data, work.width, work.height, Math.max(4, Math.round((4 * work.width) / bmp.width)));
+      }
       const pw = rescalePlan(p, natW, natH, work.width, work.height);
       const ss = Math.max(1, Math.min(3, Math.ceil(steps.max * (work.width / natW) - 0.25)));
       const out = applyTone(warp(work, pw, ss), settings.tone);

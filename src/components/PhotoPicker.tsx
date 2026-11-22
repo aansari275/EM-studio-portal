@@ -92,10 +92,10 @@ export function PhotoPicker({
         // The model runtime is ~1.5 MB of JS plus a 28 MB wasm, so it loads
         // only when someone actually asks for a background to be removed.
         const { removeBackground } = await import('../lib/bgremove');
-        const { file, keptPct } = await removeBackground(slot.file);
+        const { file, keptPct, warning } = await removeBackground(slot.file);
         // A cutout of the photo as it came in keeps its framing, so the editor
         // can work from the full-resolution original later.
-        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, working: false, cutOfOriginal: !s.original }));
+        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, cutWarn: warning || undefined, working: false, cutOfOriginal: !s.original }));
       } catch (e) {
         patch(slot.id, (s) => ({ ...s, working: false, failed: e instanceof Error ? e.message : 'failed' }));
       }
@@ -123,9 +123,10 @@ export function PhotoPicker({
     <div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2.5">
         {slots.map((s, i) => {
-          // A cut-out that keeps almost nothing, or almost everything, is the
-          // model failing rather than succeeding. Say so on the tile.
-          const suspect = s.cut && (s.keptPct! < 8 || s.keptPct! > 97);
+          // A cut-out that keeps almost nothing or almost everything, touches
+          // the frame, or is partly see-through needs a human look. Say so on
+          // the tile, and why under it. (keptPct alone for cutouts made before.)
+          const suspect = s.cut && (!!s.cutWarn || s.keptPct! < 8 || s.keptPct! > 97);
           const ticked = !!select?.selected.has(s.id);
           return (
             <div key={s.id} className="min-w-0">
@@ -164,7 +165,7 @@ export function PhotoPicker({
                 </span>
               )}
               {suspect && !s.working && !s.failed && (
-                <span className="absolute inset-x-0 top-0 bg-[#98671A] py-0.5 text-center text-[9px] font-semibold text-white">
+                <span title={s.cutWarn} className="absolute inset-x-0 top-0 bg-[#98671A] py-0.5 text-center text-[9px] font-semibold text-white">
                   Check this
                 </span>
               )}
@@ -236,6 +237,9 @@ export function PhotoPicker({
                 </button>
               </div>
             </div>
+            {suspect && s.cutWarn && !s.working && (
+              <p className="mt-1 line-clamp-3 text-[10px] leading-tight text-[#7a5215]" title={s.cutWarn}>{s.cutWarn}</p>
+            )}
             {s.sent && (
               <p className="mt-1 line-clamp-2 text-[10px] leading-tight text-[#2F4C69]" title={s.sent}>{s.sent}</p>
             )}

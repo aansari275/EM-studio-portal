@@ -1,4 +1,5 @@
 import * as ort from 'onnxruntime-web';
+import { cropBox, cutoutWarning, finishCutout, maskStats, touchesEdge, type Box, type MaskStats } from './maskRefine';
 
 /**
  * Background removal, in the browser.
@@ -48,54 +49,30 @@ export function warmUp() {
   loadSession().catch(() => {});
 }
 
-function draw(img: HTMLImageElement | ImageBitmap, w: number, h: number): ImageData {
+/** The model's input: a region of the image squeezed to SIZE x SIZE. */
+function draw(img: ImageBitmap, sx: number, sy: number, sw: number, sh: number): ImageData {
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = SIZE; c.height = SIZE;
   const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(img as CanvasImageSource, 0, 0, w, h);
-  return ctx.getImageData(0, 0, w, h);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, SIZE, SIZE);
+  return ctx.getImageData(0, 0, SIZE, SIZE);
 }
 
-async function decode(file: File): Promise<ImageBitmap> {
-  return createImageBitmap(file);
-}
-
-/**
- * Returns a PNG with the background knocked out, plus how much of the frame
- * survived. A very low or very high share is the signal that it went wrong.
- */
-export async function removeBackground(
-  file: File,
-  maxSide = 2000
-): Promise<{ file: File; keptPct: number }> {
-  const session = await loadSession();
-  const bmp = await decode(file);
-
-  // full-size canvas we will composite onto
-  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
-  const w = Math.max(1, Math.round(bmp.width * scale));
-  const h = Math.max(1, Math.round(bmp.height * scale));
-
-  // model input, always square
-  const small = draw(bmp, SIZE, SIZE);
+/** Runs the model on a region of the image; the mask comes back as a SIZE x SIZE canvas, 0..255 grey. */
+async function runModel(session: ort.InferenceSession, img: ImageBitmap, sx: number, sy: number, sw: number, sh: number): Promise<HTMLCanvasElement> {
+  const small = draw(img, sx, sy, sw, sh);
   const input = new Float32Array(3 * SIZE * SIZE);
   for (let i = 0; i < SIZE * SIZE; i++) {
     for (let c = 0; c < 3; c++) {
       input[c * SIZE * SIZE + i] = (small.data[i * 4 + c] / 255 - MEAN[c]) / STD[c];
     }
   }
-
-  const feeds: Record<string, ort.Tensor> = {
-    [session.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, SIZE, SIZE]),
-  };
-  const out = await session.run(feeds);
+  const out = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, SIZE, SIZE]) });
   const raw = out[session.outputNames[0]].data as Float32Array;
-
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < SIZE * SIZE; i++) { const v = raw[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
   const span = hi - lo || 1;
-
-  // mask back up to full size, bilinear via canvas
   const mc = document.createElement('canvas');
   mc.width = SIZE; mc.height = SIZE;
   const mctx = mc.getContext('2d')!;
@@ -105,32 +82,119 @@ export async function removeBackground(
     mimg.data[i * 4] = v; mimg.data[i * 4 + 1] = v; mimg.data[i * 4 + 2] = v; mimg.data[i * 4 + 3] = 255;
   }
   mctx.putImageData(mimg, 0, 0);
+  return mc;
+}
+
+/** A SIZE x SIZE mask stretched (bilinear) onto box `b` of a w x h frame, zero elsewhere. */
+function placeMask(mask: HTMLCanvasElement, w: number, h: number, b: Box): Uint8Array {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(mask, 0, 0, SIZE, SIZE, b.x, b.y, b.w, b.h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < out.length; i++) out[i] = d[i * 4];
+  return out;
+}
+
+/**
+ * The clean-up (guided filter, alpha, edge colour) in a worker, or here if a
+ * worker cannot start. Takes the photo's pixels and gives back the cutout's.
+ */
+function refine(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, h: number): Promise<Uint8ClampedArray> {
+  return new Promise((resolve) => {
+    const here = () => resolve(finishCutout(rgba, mask, w, h));
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL('./maskRefine.worker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      here();
+      return;
+    }
+    worker.onmessage = (e: MessageEvent<Uint8ClampedArray>) => { worker.terminate(); resolve(e.data); };
+    worker.onerror = () => { worker.terminate(); here(); };
+    // a copy goes to the worker, so the fallback still has the original pixels
+    worker.postMessage({ rgba, mask, w, h });
+  });
+}
+
+export interface Cutout {
+  file: File;
+  /** Share of the frame kept, percent. */
+  keptPct: number;
+  /** Why the cutout needs a human look, or null. */
+  warning: string | null;
+  stats: MaskStats;
+  /** Whether the model was run a second time on the rug's own crop. */
+  cropRerun: boolean;
+}
+
+/**
+ * Returns a PNG with the background knocked out, at up to `maxSide`.
+ *
+ * 1. The model on the whole photo (320 x 320), stretched to the output size.
+ * 2. Unless that mask touches the edge of the frame (a full-bleed or cut-off
+ *    shot, where it made things worse in testing), the model again on a crop
+ *    around the rug, taken from the full-resolution photo, so the rug fills
+ *    the model's input and the edge is sharper.
+ * 3. A guided filter against the photo at the output size snaps the mask to
+ *    the rug's real edge, and the part see-through edge pixels take the rug's
+ *    colour instead of the floor's, so no pale halo is left (`maskRefine.ts`).
+ * The mask stats then decide the tile's "Check this" note.
+ */
+export async function removeBackground(file: File, maxSide = 2000): Promise<Cutout> {
+  const t0 = performance.now();
+  const session = await loadSession();
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const whole: Box = { x: 0, y: 0, w, h };
+
+  let mask = placeMask(await runModel(session, bmp, 0, 0, bmp.width, bmp.height), w, h, whole);
+  const t1 = performance.now();
+  let cropRerun = false;
+  const box = touchesEdge(mask, w, h) ? null : cropBox(mask, w, h);
+  if (box && (box.w < w || box.h < h)) {
+    const k = bmp.width / w;
+    mask = placeMask(await runModel(session, bmp, box.x * k, box.y * k, box.w * k, box.h * k), w, h, box);
+    cropRerun = true;
+  }
+  const t2 = performance.now();
 
   const full = document.createElement('canvas');
   full.width = w; full.height = h;
   const fctx = full.getContext('2d', { willReadFrequently: true })!;
-  fctx.drawImage(bmp as CanvasImageSource, 0, 0, w, h);
-  const colour = fctx.getImageData(0, 0, w, h);
-
-  fctx.clearRect(0, 0, w, h);
-  fctx.drawImage(mc, 0, 0, w, h);
-  const maskUp = fctx.getImageData(0, 0, w, h);
-
-  let kept = 0;
-  for (let i = 0; i < w * h; i++) {
-    const a = maskUp.data[i * 4];
-    colour.data[i * 4 + 3] = a;
-    if (a > 128) kept++;
-  }
-  fctx.putImageData(colour, 0, 0);
+  fctx.imageSmoothingQuality = 'high';
+  fctx.drawImage(bmp, 0, 0, w, h);
   bmp.close?.();
+  const colour = fctx.getImageData(0, 0, w, h);
+  const done = await refine(colour.data, mask, w, h);
+  const t3 = performance.now();
+  fctx.putImageData(new ImageData(new Uint8ClampedArray(done), w, h), 0, 0);
+  const alpha = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) alpha[i] = done[i * 4 + 3];
 
   const blob: Blob = await new Promise((res, rej) =>
     full.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the cut-out.'))), 'image/png')
   );
+  const stats = maskStats(alpha, w, h);
+  // Timings for checking speed on a real build (Performance panel); no UI.
+  try {
+    performance.measure('bgremove:model', { start: t0, end: t1 });
+    performance.measure('bgremove:crop-rerun', { start: t1, end: t2 });
+    performance.measure('bgremove:refine', { start: t2, end: t3 });
+    performance.measure('bgremove:total', { start: t0, end: performance.now() });
+  } catch { /* older browsers */ }
   const name = file.name.replace(/\.[^.]+$/, '') + '-cutout.png';
   return {
     file: new File([blob], name, { type: 'image/png' }),
-    keptPct: Math.round((100 * kept) / (w * h)),
+    keptPct: stats.keptPct,
+    warning: cutoutWarning(stats),
+    stats,
+    cropRerun,
   };
 }
