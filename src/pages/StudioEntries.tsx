@@ -12,6 +12,7 @@ import { currentActor } from '../lib/auth';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { addStudioCustomer } from '../lib/options';
 import { thumb } from '../lib/img';
+import { TrainingButton } from '../components/TrainingButton';
 
 /**
  * Custom Rugs and Sample Dispatch: one page, two kinds. Entries are grouped
@@ -149,6 +150,7 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
             <h1 className="font-serif text-[26px] font-normal">{copy.title}</h1>
             <p className="mt-1 text-[13.5px] text-neutral-500">{copy.blurb}</p>
           </div>
+          <TrainingButton videoId={kind === 'custom-rug' ? 'custom-rugs' : 'sample-dispatch'} />
           <button type="button" onClick={() => setOpen({ mode: 'new', id: newEntryId(kind) })}
             className="flex items-center gap-1.5 rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white">
             <Plus className="h-4 w-4" strokeWidth={2.5} /> New entry

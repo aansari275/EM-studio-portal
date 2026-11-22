@@ -28,6 +28,7 @@ import { useRotate, RotateButton } from '../components/Rotate';
 import { useTabActive } from '../lib/tabContext';
 import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
 import type { Slot } from '../lib/photoSlots';
+import { TrainingButton } from '../components/TrainingButton';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -203,6 +204,9 @@ export function Library() {
     <div className="flex min-h-full flex-col bg-white text-neutral-900">
 
       <div className="mx-auto w-full max-w-[1400px] px-7">
+        <div className="flex justify-end">
+          <TrainingButton videoId="library" className="-mb-4 mt-5" />
+        </div>
         <label
           className={
             'mt-8 flex items-center gap-4 rounded-md border bg-white px-5 transition-colors ' +

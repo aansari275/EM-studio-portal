@@ -22,6 +22,7 @@ import { usePhotoSync } from '../lib/usePhotoSync';
 import { useAutosave } from '../lib/useAutosave';
 import { currentActor } from '../lib/auth';
 import { loadBgDraft, saveBgDraft, saveBgDraftOnExit, uploadBgFile, type BgPhoto } from '../lib/bgDraft';
+import { TrainingButton } from '../components/TrainingButton';
 
 /**
  * Background removal on its own page, for photos that are not going into the
@@ -256,6 +257,7 @@ export function BackgroundRemoval() {
         <div className="mt-8 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <h1 className="font-serif text-[26px] font-normal">Background Removal</h1>
           {actor && <SaveStatus status={status} uploading={uploading} failed={failedUploads} />}
+          <TrainingButton videoId="background-removal" className="ml-auto self-center" />
         </div>
         <p className="mt-1.5 max-w-[640px] text-[13.5px] text-neutral-500">
           Drop photos here, remove their backgrounds, then click a photo to fix skew, straighten,
