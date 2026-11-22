@@ -235,7 +235,7 @@ export default function PhotoEditor({
                 <button key={t.id} type="button" role="tab" aria-selected={tool === t.id}
                   onClick={() => setTool(t.id)}
                   className={
-                    'flex-1 border-b-[1.5px] px-1 py-3 text-[12.5px] transition-colors ' +
+                    'flex-1 whitespace-nowrap border-b-[1.5px] px-0.5 py-3 text-[12.5px] transition-colors ' +
                     (tool === t.id
                       ? 'border-[#2F4C69] font-semibold text-neutral-900'
                       : 'border-transparent text-neutral-400 hover:text-neutral-700')

@@ -121,7 +121,8 @@ export function PhotoPicker({
 
   return (
     <div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2.5">
+      {/* tiles with tick boxes are wider, so the box and the tile buttons never overlap */}
+      <div className={'grid gap-2.5 ' + (select ? 'grid-cols-[repeat(auto-fill,minmax(112px,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(84px,1fr))]')}>
         {slots.map((s, i) => {
           // A cut-out that keeps almost nothing or almost everything, touches
           // the frame, or is partly see-through needs a human look. Say so on
@@ -202,7 +203,7 @@ export function PhotoPicker({
                 </span>
               )}
               {select && !s.rejected && (
-                <label className="absolute left-1 top-1 grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.15)]"
+                <label className="absolute left-1 top-1 z-10 grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.15)]"
                   title="Select for Send to">
                   <input type="checkbox" checked={ticked} onChange={() => select.toggle(s.id)}
                     aria-label={`Select photo ${i + 1}`}

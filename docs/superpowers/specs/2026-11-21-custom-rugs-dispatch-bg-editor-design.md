@@ -163,3 +163,60 @@ autosave edits. Background Removal keeps one draft per person in
 `studio_bg_drafts/{uid}`, files under `studio-portal/bg-drafts/{uid}/`. Closing a tab
 or the page while something is unsaved asks first. Not covered: Library New design
 and Edit design.
+
+## Addendum, 22 Nov 2026 (2): true proportions, Size step, Send to, cleaner cutouts
+
+Owner feedback on a real photo (DSC04675, 7952x5304, a ~5x8 rug shot from one end):
+Fix skew gave a near-square 1366x1195. Branch `feat/skew-size-send-to`.
+
+**Proportions.** The output shape is no longer the average of opposite sides
+(foreshortening made long rugs square). `estimateAspect()` in `photoEdit.ts` is
+Zhang and He's whiteboard rectification: square pixels, principal point at the
+frame centre, focal length from the two vanishing points. When a pair of sides
+is near parallel (a rug shot straight from one end) the focal length cannot be
+measured, so it comes from EXIF `FocalLengthIn35mmFilm` (`jpegFocal35`), or a
+typical 28mm-equivalent lens; flat-on views and absurd results use the side
+ratio. Coordinates must be the camera's own frame: true for the photo as it came
+in and for a cutout of it (`Slot.cutOfOriginal`, kept in drafts and entries);
+after any edit the estimate is labelled a rough guess. On DSC04675 with corners
+fitted to the rug's edges: 1 : 1.48 (old: 1.15 : 1). The rug is "roughly 5x8"
+(1 : 1.60); 28mm wide-angle distortion and corner placement account for the gap.
+Tested synthetically (1:1, 2:3, 5:8, 1:3 under oblique and steep end-on poses).
+
+**Size step.** Width and length stretch separately (slider plus percent, lock
+off by default), Auto, and Rug size (ft or cm, common sizes, swap; the photo's
+long side stays long) which sets the shape exactly (`shape` wins over corner
+moves). `stretch` and `shape` are edit settings, composed after straighten and
+before crop in the one output-to-source matrix; works without a skew fix too.
+
+**Resolution.** Apply now sizes the result from the full-resolution original
+when the tile is a cutout of it (mask scaled up onto it), sampling a working
+copy up to 6000px chosen so the far end is ~1:1, supersampling the squeezed
+near end. DSC04675 with 5x8: 1250x2000 (was 1366x1195). Entries still store
+through their 2000px / 2 MB compression, so a large PNG arrives smaller there
+(916x1468 for this one), same shape.
+
+**Send to** (Background Removal). Tick boxes and Select all, then Send to:
+Custom Rugs or Sample Dispatch (new entry, or one of hers, draft or saved) or
+Library (New design, or an existing design via the library search). Entries:
+each photo (current edit plus original) is uploaded into the entry's folder from
+Background Removal with per-tile progress, then handed to the tab in memory
+(`lib/sendTo.ts`): the open dialog for that entry takes it, else the entry (or
+New entry) opens with it, else (another entry open) it is written by
+transaction and a note says so. Library existing: `appendDesignPhotos` runs
+Edit design's own `uploadEditPhotos` + `updateProduct` (photos in
+`orderedImages()` order, new ones last, so the main photo is unchanged).
+Library new: the New design form opens with the photos; they count as sent
+when the design is created. Failed photos stay selected with Retry. Remove from
+here after sending is on by default; otherwise the tile notes where it went
+(kept in the draft). Nothing is deleted.
+
+**Cleaner cutouts** (`lib/maskRefine.ts`, in a worker). Crop re-run of the
+model around the rug from the full-resolution photo unless the rug runs into
+the frame edge (over 0.5% of the edge band; a grazing corner does not count),
+then a colour guided filter at the cutout's size, then edge pixels take the
+rug's colour (removes the last pale line). Check this also flags a rug touching
+the frame edge and a mostly see-through result, with the reason under the
+tile. Not fixed: folded-back rugs, a person on the rug, other rugs behind.
+Measured on the production build, per photo: ~2.2 s first pass, ~1.9 s crop
+re-run, ~1.6 s clean-up (worker); ~5.8 s total (was ~2.3 s).
