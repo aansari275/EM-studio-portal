@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, useId } from 'react';
 
 /**
  * Each page opened in the studio shell lives in its own tab and stays mounted
@@ -10,7 +10,8 @@ import { createContext, useContext, useEffect } from 'react';
  */
 export type TabContextValue = {
   active: boolean;
-  setGuard: (message: string | null) => void;
+  /** Several parts of a page can guard at once (the page and its dialog), each under its own id. */
+  setGuard: (id: string, message: string | null) => void;
 };
 
 export const TabContext = createContext<TabContextValue>({ active: true, setGuard: () => {} });
@@ -21,10 +22,36 @@ export function useTabActive(): boolean {
 
 export function useTabGuard(message: string | null) {
   const { setGuard } = useContext(TabContext);
+  const id = useId();
   useEffect(() => {
-    setGuard(message);
-    return () => setGuard(null);
-  }, [message, setGuard]);
+    setGuard(id, message);
+    return () => setGuard(id, null);
+  }, [id, message, setGuard]);
+}
+
+// beforeunload: one listener for the whole app, warning while anything registered is unsaved.
+const unsaved = new Map<string, string>();
+let listening = false;
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!unsaved.size) return;
+  e.preventDefault();
+  e.returnValue = ''; // older browsers need it set to show the prompt
+}
+
+/**
+ * Work that is not in the cloud yet (an autosave waiting or failing, photos
+ * still uploading): closing the tab asks first, and so does closing the page
+ * in the browser (beforeunload).
+ */
+export function useUnsavedWork(message: string | null) {
+  useTabGuard(message);
+  const id = useId();
+  useEffect(() => {
+    if (!message) return;
+    unsaved.set(id, message);
+    if (!listening) { window.addEventListener('beforeunload', onBeforeUnload); listening = true; }
+    return () => { unsaved.delete(id); };
+  }, [id, message]);
 }
 
 export type TabKey = 'library' | 'custom-rugs' | 'sample-dispatch' | 'background-removal' | 'links' | 'more';

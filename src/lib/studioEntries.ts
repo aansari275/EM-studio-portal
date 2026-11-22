@@ -1,11 +1,12 @@
 import {
-  collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, arrayUnion,
+  collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc,
   serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from './firebase';
-import { currentUserEmail } from './auth';
+import { currentUserEmail, type Actor } from './auth';
 import { getSavedCustomers } from './options';
+import { patchOnExit } from './exitSave';
 
 /**
  * Custom Rugs and Sample Dispatch: photos filed by customer and date.
@@ -17,6 +18,12 @@ import { getSavedCustomers } from './options';
  *
  * Delete is soft (`deleted: true`). Nothing is erased, so the Firestore
  * delete lock is never involved and every photo stays in Storage.
+ *
+ * Drafts (22 Nov 2026): a New entry is created as soon as its form has
+ * anything in it, with `status: 'draft'`, and autosaved from then on
+ * (debounced in the dialog, keepalive REST write on pagehide). Older docs have
+ * no `status` and count as saved. Save entry flips it to `'saved'`; Discard
+ * sets `deleted: true`. Still one equality filter for the listing.
  */
 
 export type EntryKind = 'custom-rug' | 'sample-dispatch';
@@ -39,7 +46,13 @@ export interface EntryPhoto {
   width: number;
   height: number;
   uploadedAt: string;
+  /** The photo before a cutout or edit, so Undo works after a reload. */
+  originalUrl?: string;
+  originalPath?: string;
+  cut?: boolean;
 }
+
+export type EntryStatus = 'draft' | 'saved';
 
 export interface EntryDetails {
   customerName: string;
@@ -54,10 +67,12 @@ export interface StudioEntry extends EntryDetails {
   kind: EntryKind;
   photos: EntryPhoto[];
   createdBy: string;
+  createdByUid: string;
   createdAt: string;
   updatedAt: string;
   updatedBy: string;
   deleted: boolean;
+  status: EntryStatus;
 }
 
 export interface Customer {
@@ -79,10 +94,12 @@ function mapEntry(kind: EntryKind, id: string, d: Record<string, unknown>): Stud
     note: String(d.note || ''),
     photos: Array.isArray(d.photos) ? (d.photos as EntryPhoto[]).filter((p) => p && p.url) : [],
     createdBy: String(d.createdBy || ''),
+    createdByUid: String(d.createdByUid || ''),
     createdAt: iso(d.createdAt),
     updatedAt: iso(d.updatedAt),
     updatedBy: String(d.updatedBy || ''),
     deleted: d.deleted === true,
+    status: d.status === 'draft' ? 'draft' : 'saved', // no status = saved (before drafts existed)
   };
 }
 
@@ -143,89 +160,17 @@ async function prepare(file: File): Promise<{ body: Blob; type: string; ext: str
 const safeBase = (name: string) =>
   (name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'photo').slice(0, 60);
 
-async function uploadPhotos(
-  kind: EntryKind,
-  id: string,
-  files: File[],
-  onProgress?: (done: number, total: number) => void
-): Promise<EntryPhoto[]> {
-  const out: EntryPhoto[] = [];
-  for (let i = 0; i < files.length; i++) {
-    const p = await prepare(files[i]);
-    const name = `${safeBase(files[i].name)}.${p.ext}`;
-    // A time stamp keeps two photos with the same name from overwriting each other.
-    const path = `${FOLDER[kind]}/${id}/${Date.now()}-${i}-${name}`;
-    const sref = ref(storage, path);
-    await uploadBytes(sref, p.body, { contentType: p.type });
-    out.push({
-      url: await getDownloadURL(sref),
-      path, name, width: p.width, height: p.height,
-      uploadedAt: new Date().toISOString(),
-    });
-    onProgress?.(i + 1, files.length);
-  }
-  return out;
+/** One photo into an entry's folder, compressed like the others. For background uploads. */
+export async function uploadEntryPhoto(kind: EntryKind, id: string, file: File): Promise<EntryPhoto> {
+  const p = await prepare(file);
+  const name = `${safeBase(file.name)}.${p.ext}`;
+  const path = `${FOLDER[kind]}/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${name}`;
+  const sref = ref(storage, path);
+  await uploadBytes(sref, p.body, { contentType: p.type });
+  return { url: await getDownloadURL(sref), path, name, width: p.width, height: p.height, uploadedAt: new Date().toISOString() };
 }
 
 // ─── Writes ─────────────────────────────────────────────────────────────────
-
-/**
- * Creates an entry. The photos go up first and the document is written last,
- * so the list never shows an entry whose photos are still missing.
- */
-export async function createEntry(
-  kind: EntryKind,
-  details: EntryDetails,
-  files: File[],
-  onProgress?: (done: number, total: number) => void
-): Promise<StudioEntry> {
-  const d = checkDetails(details);
-  if (!files.length) throw new Error('Add at least one photo.');
-  const r = doc(collection(db, COLLECTION[kind]));
-  const photos = await uploadPhotos(kind, r.id, files, onProgress);
-  await setDoc(r, {
-    ...d,
-    photos,
-    createdBy: who(),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    updatedBy: who(),
-    deleted: false,
-  });
-  return (await getEntry(kind, r.id))!;
-}
-
-export async function updateEntryDetails(kind: EntryKind, id: string, details: EntryDetails): Promise<StudioEntry | null> {
-  const d = checkDetails(details);
-  await updateDoc(entryRef(kind, id), { ...d, updatedAt: serverTimestamp(), updatedBy: who() });
-  return getEntry(kind, id);
-}
-
-export async function addEntryPhotos(
-  kind: EntryKind,
-  id: string,
-  files: File[],
-  onProgress?: (done: number, total: number) => void
-): Promise<StudioEntry | null> {
-  if (!files.length) return getEntry(kind, id);
-  const photos = await uploadPhotos(kind, id, files, onProgress);
-  await updateDoc(entryRef(kind, id), {
-    photos: arrayUnion(...photos),
-    updatedAt: serverTimestamp(),
-    updatedBy: who(),
-  });
-  return getEntry(kind, id);
-}
-
-/**
- * Sets the entry's photo list, to remove or reorder. A removed photo is only
- * taken off the entry; its file stays in Storage.
- */
-export async function setEntryPhotos(kind: EntryKind, id: string, photos: EntryPhoto[]): Promise<StudioEntry | null> {
-  if (!photos.length) throw new Error('An entry needs at least one photo. Delete the entry instead.');
-  await updateDoc(entryRef(kind, id), { photos, updatedAt: serverTimestamp(), updatedBy: who() });
-  return getEntry(kind, id);
-}
 
 export async function softDeleteEntry(kind: EntryKind, id: string): Promise<void> {
   await updateDoc(entryRef(kind, id), {
@@ -280,4 +225,82 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export function formatDate(d: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
   return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : d;
+}
+
+// ─── Drafts and autosave ────────────────────────────────────────────────────
+
+/** A fresh document id for a new entry, so photos can upload before the draft is written. */
+export function newEntryId(kind: EntryKind): string {
+  return doc(collection(db, COLLECTION[kind])).id;
+}
+
+/** Everything the dialog autosaves. */
+export interface EntryFields extends EntryDetails {
+  photos: EntryPhoto[];
+}
+
+const cleanPhotos = (photos: EntryPhoto[]) =>
+  photos.map((p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)) as unknown as EntryPhoto);
+
+const draftCreation = (by: Actor) => ({
+  status: 'draft' as const,
+  deleted: false,
+  createdBy: by.email || 'studio',
+  createdByUid: by.uid,
+});
+
+/**
+ * The autosave write. `create` is true until the draft document exists:
+ * then the draft fields are written as well. Never changes `status` of an
+ * existing entry, so editing a saved entry keeps it saved.
+ */
+export async function saveEntryFields(kind: EntryKind, id: string, f: EntryFields, by: Actor, create: boolean): Promise<void> {
+  const body = {
+    customerName: f.customerName.trim(),
+    customerCode: f.customerCode || null,
+    date: f.date,
+    note: f.note,
+    photos: cleanPhotos(f.photos),
+    updatedAt: serverTimestamp(),
+    updatedBy: by.email || 'studio',
+    ...(create ? { ...draftCreation(by), createdAt: serverTimestamp() } : {}),
+  };
+  await setDoc(entryRef(kind, id), body, { merge: true });
+}
+
+/** The same write for a page that is closing (keepalive REST). */
+export function saveEntryFieldsOnExit(kind: EntryKind, id: string, f: EntryFields, by: Actor, create: boolean): void {
+  const now = new Date();
+  patchOnExit(`${COLLECTION[kind]}/${id}`, {
+    customerName: f.customerName.trim(),
+    customerCode: f.customerCode || null,
+    date: f.date,
+    note: f.note,
+    photos: cleanPhotos(f.photos),
+    updatedAt: now,
+    updatedBy: by.email || 'studio',
+    ...(create ? { ...draftCreation(by), createdAt: now } : {}),
+  }, !create);
+}
+
+/** Save entry: checks it is complete, then flips the draft to saved. */
+export async function promoteEntry(kind: EntryKind, id: string, f: EntryFields, by: Actor): Promise<StudioEntry> {
+  const d = checkDetails(f);
+  if (!f.photos.length) throw new Error('Add at least one photo.');
+  await setDoc(entryRef(kind, id), {
+    ...d,
+    photos: cleanPhotos(f.photos),
+    status: 'saved',
+    deleted: false,
+    updatedAt: serverTimestamp(),
+    updatedBy: by.email || 'studio',
+  }, { merge: true });
+  return (await getEntry(kind, id))!;
+}
+
+/** Discard draft: soft, like delete. */
+export async function discardDraft(kind: EntryKind, id: string, by: Actor): Promise<void> {
+  await setDoc(entryRef(kind, id), {
+    deleted: true, deletedAt: serverTimestamp(), deletedBy: by.email || 'studio',
+  }, { merge: true });
 }

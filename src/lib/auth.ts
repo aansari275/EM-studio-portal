@@ -67,3 +67,11 @@ export function currentUserEmail(): string | null {
 export function currentUserUid(): string | null {
   return auth.currentUser?.uid ?? null;
 }
+
+/** Who is making a change: the signed-in user. Drafts are keyed by uid. */
+export type Actor = { uid: string; email: string };
+
+export function currentActor(): Actor | null {
+  const u = auth.currentUser;
+  return u ? { uid: u.uid, email: u.email || '' } : null;
+}

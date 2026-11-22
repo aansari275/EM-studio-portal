@@ -3,11 +3,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, X } from 'lucide-react';
 import { EntryDialog } from '../components/EntryDialog';
 import {
-  listEntries, listCustomers, restoreEntry, sortEntries, formatDate, type EntryKind, type StudioEntry,
+  listEntries, listCustomers, restoreEntry, sortEntries, formatDate, discardDraft, type EntryKind, type StudioEntry,
 } from '../lib/studioEntries';
+import { currentActor } from '../lib/auth';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { addStudioCustomer } from '../lib/options';
 import { thumb } from '../lib/img';
-import { useTabGuard } from '../lib/tabContext';
 
 /**
  * Custom Rugs and Sample Dispatch: one page, two kinds. Entries are grouped
@@ -35,7 +36,6 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
   const [open, setOpen] = useState<Open>(null);
   const [undo, setUndo] = useState<StudioEntry | null>(null);
   const [undoError, setUndoError] = useState('');
-  useTabGuard(open?.mode === 'new' ? 'The new entry you started has not been saved and will be lost.' : null);
 
   const key = ['studio-entries', kind];
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
@@ -44,7 +44,12 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
   });
   const customersQ = useQuery({ queryKey: ['studio-customers'], queryFn: listCustomers, staleTime: 10 * 60 * 1000 });
 
-  const entries = useMemo(() => data || [], [data]);
+  // Drafts are in the same collection; only her own show, in their own group.
+  const me = currentActor()?.uid || '';
+  const all = useMemo(() => data || [], [data]);
+  const entries = useMemo(() => all.filter((e) => e.status !== 'draft'), [all]);
+  const drafts = useMemo(() => all.filter((e) => e.status === 'draft' && e.createdByUid === me)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [all, me]);
   const groups = useMemo(() => {
     const t = term.trim().toLowerCase();
     const shown = t ? entries.filter((e) => e.customerName.toLowerCase().includes(t)) : entries;
@@ -57,7 +62,8 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
     return [...by.values()].sort((a, b) => b[0].date.localeCompare(a[0].date));
   }, [entries, term]);
 
-  const opened = open?.mode === 'open' ? entries.find((e) => e.id === open.id) : undefined;
+  const opened = open?.mode === 'open' ? all.find((e) => e.id === open.id) : undefined;
+  const [discarding, setDiscarding] = useState<StudioEntry | null>(null);
 
   const put = (e: StudioEntry) =>
     qc.setQueryData<StudioEntry[]>(key, (cur) => sortEntries([...(cur || []).filter((x) => x.id !== e.id), e]));
@@ -94,6 +100,42 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
             <Plus className="h-4 w-4" strokeWidth={2.5} /> New entry
           </button>
         </div>
+
+        {drafts.length > 0 && (
+          <section aria-labelledby="drafts-title" className="mt-7 rounded-md border border-[#98671A]/30 bg-[#98671A]/[0.04] px-4 py-4">
+            <h2 id="drafts-title" className="flex items-baseline gap-3">
+              <span className="font-serif text-[19px]">Drafts</span>
+              <span className="text-[12px] text-neutral-500">Only you see these. They save as you go.</span>
+            </h2>
+            <ul className="mt-3 space-y-2">
+              {drafts.map((d) => (
+                <li key={d.id} className="flex flex-col gap-3 rounded-sm bg-white px-3 py-3 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] sm:flex-row sm:items-center sm:gap-5">
+                  <div className="min-w-0 sm:w-48 sm:shrink-0">
+                    <div className="truncate text-[14px] font-semibold">{d.customerName || 'No customer yet'}</div>
+                    <div className="text-[12px] text-neutral-400">
+                      {formatDate(d.date)}, {d.photos.length} photo{d.photos.length === 1 ? '' : 's'}
+                    </div>
+                    {d.note && <div className="mt-0.5 line-clamp-1 text-[12.5px] text-neutral-500">{d.note}</div>}
+                  </div>
+                  <div className="flex min-w-0 flex-1 gap-2 overflow-hidden">
+                    {d.photos.slice(0, 6).map((p) => (
+                      <img key={p.path || p.url} src={thumb(p.url, 160)} alt="" loading="lazy"
+                        className="h-12 w-12 shrink-0 rounded-sm bg-neutral-50 object-contain shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]" />
+                    ))}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-4">
+                    <button type="button" onClick={() => setDiscarding(d)}
+                      className="text-[13px] text-neutral-500 hover:text-red-700">Discard</button>
+                    <button type="button" onClick={() => setOpen({ mode: 'open', id: d.id })}
+                      className="rounded-sm border border-[#2F4C69] px-3 py-1.5 text-[12.5px] font-semibold text-[#2F4C69] hover:bg-[#2F4C69]/5">
+                      Continue
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {entries.length > 0 && (
           <label className="mt-7 flex items-center gap-3 rounded-md border border-neutral-200 px-4 focus-within:border-[#2F4C69]">
@@ -184,7 +226,7 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
 
       {open && (open.mode === 'new' || opened) && (
         <EntryDialog
-          key={open.mode === 'new' ? 'new' : open.id}
+          key={open.mode === 'new' ? 'new' : `${open.id}-${opened?.status}`}
           kind={kind}
           entry={opened}
           customers={customersQ.data || []}
@@ -194,10 +236,31 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
           onSaved={(e) => {
             put(e);
             setUndo(null);
-            // a new entry opens straight away, so she sees what was saved
-            if (open.mode === 'new') setOpen({ mode: 'open', id: e.id });
+            // the saved entry opens straight away, so she sees what was saved
+            setOpen({ mode: 'open', id: e.id });
           }}
+          onChanged={put}
           onDeleted={(e) => { drop(e); setUndo(e); setOpen(null); }}
+          onDiscarded={(id) => { qc.setQueryData<StudioEntry[]>(key, (cur) => (cur || []).filter((x) => x.id !== id)); setOpen(null); }}
+        />
+      )}
+
+      {discarding && (
+        <ConfirmDialog
+          title="Discard this draft?"
+          message={`The draft${discarding.customerName ? ` for ${discarding.customerName}` : ''} is taken off the list. Its photos stay in storage.`}
+          confirmLabel="Discard draft" danger
+          onCancel={() => setDiscarding(null)}
+          onConfirm={async () => {
+            const d = discarding;
+            setDiscarding(null);
+            try {
+              await discardDraft(kind, d.id, currentActor() || { uid: '', email: 'studio' });
+              drop(d);
+            } catch {
+              setUndoError('Could not discard the draft. Try again.');
+            }
+          }}
         />
       )}
     </div>

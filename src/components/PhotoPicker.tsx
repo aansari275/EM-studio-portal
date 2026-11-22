@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Plus, X, Undo2, Scissors, Download } from 'lucide-react';
 import { ACCEPT } from '../lib/imageIntake';
-import { addFilesAsSlots, isBusySlot, isReadySlot, type Slot, type SlotUpdate } from '../lib/photoSlots';
+import {
+  addFilesAsSlots, isBusySlot, isReadySlot, isSyncedSlot, replaceFile, restoreOriginal, type Slot, type SlotUpdate,
+} from '../lib/photoSlots';
 
 export type { Slot };
 
@@ -38,6 +40,7 @@ export function PhotoPicker({
   hasMain,
   noMain,
   onDownload,
+  showSync,
 }: {
   slots: Slot[];
   /** A state setter: updates arrive while conversions and cutouts finish. */
@@ -49,6 +52,8 @@ export function PhotoPicker({
   noMain?: boolean;
   /** Shows a download button on each tile. */
   onDownload?: (i: number) => void;
+  /** Tiles upload as they are added (autosave): show each tile's upload state. */
+  showSync?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [urls, setUrls] = useState<string[]>([]);
@@ -85,7 +90,7 @@ export function PhotoPicker({
         // only when someone actually asks for a background to be removed.
         const { removeBackground } = await import('../lib/bgremove');
         const { file, keptPct } = await removeBackground(slot.file);
-        patch(slot.id, (s) => ({ id: s.id, file, original: s.original || s.file, cut: true, keptPct, working: false }));
+        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, working: false }));
       } catch (e) {
         patch(slot.id, (s) => ({ ...s, working: false, failed: e instanceof Error ? e.message : 'failed' }));
       }
@@ -93,10 +98,10 @@ export function PhotoPicker({
     setCutting(false);
   }
 
-  const undo = (id: string) => patch(id, (s) => (s.original ? { id: s.id, file: s.original } : s));
+  const undo = (id: string) => patch(id, restoreOriginal);
 
   const edited = (id: string, file: File) => {
-    patch(id, (s) => ({ ...s, file, original: s.original || s.file, failed: undefined }));
+    patch(id, (s) => replaceFile(s, file));
     setEditing(null);
   };
 
@@ -154,6 +159,19 @@ export function PhotoPicker({
                 <span className="absolute inset-x-0 top-0 bg-[#98671A] py-0.5 text-center text-[9px] font-semibold text-white">
                   Check this
                 </span>
+              )}
+              {showSync && !s.converting && !s.rejected && !s.working && (
+                s.syncError ? (
+                  <span className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-red-700 px-1 py-0.5 text-[9px] font-semibold text-white" title={s.syncError}>
+                    Upload failed
+                    <button type="button" onClick={() => patch(s.id, (x) => ({ ...x, syncError: undefined }))}
+                      aria-label={`Retry uploading photo ${i + 1}`} className="underline underline-offset-2">Retry</button>
+                  </span>
+                ) : s.syncing || !isSyncedSlot(s) ? (
+                  <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9px] font-semibold text-white">Uploading…</span>
+                ) : (
+                  <span className="absolute bottom-1 left-1 rounded-sm bg-white/90 px-1 text-[9px] font-semibold text-emerald-700">Saved</span>
+                )
               )}
               {i === 0 && !hasMain && !noMain && !isBusySlot(s) && !s.rejected && (
                 <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9.5px] font-semibold uppercase tracking-wide text-white">

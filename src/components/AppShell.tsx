@@ -95,6 +95,11 @@ export function AppShell() {
 
   // Moving focus into the newly shown tab's strip button keeps keyboard users oriented.
   const tabRefs = useRef<Partial<Record<TabKey, HTMLButtonElement | null>>>({});
+  // the active tab is always in view in the strip (it scrolls sideways on phones)
+  useEffect(() => {
+    tabRefs.current[activeKey]?.parentElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeKey, open]);
+
   const onStripKey = (e: React.KeyboardEvent) => {
     const i = open.indexOf(activeKey);
     let to: TabKey | undefined;
@@ -197,8 +202,13 @@ function TabPanel({ k, active, setGuards, panelRef, onScroll }: {
   panelRef: (el: HTMLDivElement | null) => void;
   onScroll: (top: number) => void;
 }) {
-  const setGuard = useCallback((message: string | null) =>
-    setGuards((g) => (g[k] === message ? g : { ...g, [k]: message })), [k, setGuards]);
+  // every guard registered in this tab, by id; the tab's message is the first one
+  const mine = useRef(new Map<string, string>());
+  const setGuard = useCallback((id: string, message: string | null) => {
+    if (message) mine.current.set(id, message); else mine.current.delete(id);
+    const first = mine.current.values().next().value ?? null;
+    setGuards((g) => (g[k] === first ? g : { ...g, [k]: first }));
+  }, [k, setGuards]);
   const ctx = useMemo<TabContextValue>(() => ({ active, setGuard }), [active, setGuard]);
   // render() is stable per key; memo keeps the page from re-rendering on every shell render.
   const page = useMemo(() => BY_KEY[k].render(), [k]);

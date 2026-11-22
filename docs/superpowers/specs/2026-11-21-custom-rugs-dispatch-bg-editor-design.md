@@ -127,3 +127,39 @@ transparent cutout black. Rotate must detect alpha and save PNG in that case.
   library and confirm no black background.
 - Test entries use customer name `TEST` and are soft deleted afterwards.
 - Nothing is pushed to `main`. Abdul reviews on the dev server first.
+
+## Addendum, 22 Nov 2026: sidebar with tabs, every image format, autosave drafts
+
+Three owner requests after the first release. Branch `feat/left-sidebar`.
+
+**Sidebar with tabs.** `components/AppShell.tsx` replaces `AppHeader`. A fixed 220px
+left sidebar from `md` (brand, the six pages, Sign out at the bottom); under `md` a slim
+top bar and a drawer from the left (Escape, focus moved in and kept in, backdrop).
+Each sidebar item opens as a tab in a strip above the content, like ERP Desk: an open
+item focuses its tab, every opened page stays mounted and is hidden (`hidden`) when not
+in front, so dropped photos, half-filled dialogs, searches, ticked trays and scroll
+positions (each panel is its own scroll container) survive switching. Library cannot
+be closed. The URL follows the active tab; refresh opens Library plus the tab in the
+URL; back and forward switch tabs; nothing is stored in the browser. Dialog key
+handlers are quiet in hidden tabs (`useTabActive`). Modals cover the sidebar and the
+strip. Legacy routes (`/dispatches`, `/sample-bazar`, `/kapetto`, `/rug-gallery`,
+`/upload/...`, `/admin/migrate`) stay plain full pages outside the shell.
+
+**Every image format.** `lib/imageIntake.ts` `normaliseImage()` on every file added
+through `PhotoPicker` or `PhotoDrop`: format by signature (`lib/imageFormat.ts`), out
+as an upright full-resolution JPEG, or PNG with alpha. JPG, PNG, WebP, GIF (first
+frame), BMP, AVIF natively; HEIC/HEIF via `heic-to` (LGPL-3.0, lazy); TIFF via
+`utif2` (MIT, lazy); camera RAW via the embedded camera JPEG preview when it is at
+least 1500px, else a clear per-file message. A file that cannot be opened never
+stops the rest of the drop.
+
+**Autosave drafts.** Cloud only (Firestore, ~1.5 s debounce, keepalive REST write on
+pagehide and hidden tab, retry with backoff), the same approach as `saveSlideLayout`.
+New entries become `status: 'draft'` docs in the same collections as soon as they
+have content; Save entry sets `status: 'saved'`; Discard sets `deleted: true`. Photos
+upload in the background per tile, with the pre-edit original kept (`originalUrl`,
+`originalPath`). A Drafts group shows the signed-in user's own drafts. Saved entries
+autosave edits. Background Removal keeps one draft per person in
+`studio_bg_drafts/{uid}`, files under `studio-portal/bg-drafts/{uid}/`. Closing a tab
+or the page while something is unsaved asks first. Not covered: Library New design
+and Edit design.
