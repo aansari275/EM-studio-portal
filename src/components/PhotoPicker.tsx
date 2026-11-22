@@ -41,6 +41,7 @@ export function PhotoPicker({
   noMain,
   onDownload,
   showSync,
+  select,
 }: {
   slots: Slot[];
   /** A state setter: updates arrive while conversions and cutouts finish. */
@@ -54,6 +55,8 @@ export function PhotoPicker({
   onDownload?: (i: number) => void;
   /** Tiles upload as they are added (autosave): show each tile's upload state. */
   showSync?: boolean;
+  /** Tick boxes on the tiles (Background Removal's Send to), with Retry for a failed send. */
+  select?: { selected: Set<string>; toggle: (id: string) => void; onRetry?: (id: string) => void };
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [urls, setUrls] = useState<string[]>([]);
@@ -123,9 +126,12 @@ export function PhotoPicker({
           // A cut-out that keeps almost nothing, or almost everything, is the
           // model failing rather than succeeding. Say so on the tile.
           const suspect = s.cut && (s.keptPct! < 8 || s.keptPct! > 97);
+          const ticked = !!select?.selected.has(s.id);
           return (
-            <div key={s.id}
-              className="group relative aspect-square overflow-hidden rounded-sm bg-[conic-gradient(#f3f3f3_0_25%,#fff_0_50%,#f3f3f3_0_75%,#fff_0)] bg-[length:14px_14px]">
+            <div key={s.id} className="min-w-0">
+            <div
+              className={'group relative aspect-square overflow-hidden rounded-sm bg-[conic-gradient(#f3f3f3_0_25%,#fff_0_50%,#f3f3f3_0_75%,#fff_0)] bg-[length:14px_14px] ' +
+                (ticked ? 'shadow-[0_0_0_2px_#2F4C69]' : '')}>
               {s.rejected ? (
                 <div role="alert" aria-label={s.rejected} title={s.rejected}
                   className="flex h-full w-full flex-col justify-center gap-0.5 overflow-hidden border border-red-200 bg-red-50 p-1.5 text-[10px] leading-tight text-red-800 [overflow-wrap:anywhere]">
@@ -162,7 +168,7 @@ export function PhotoPicker({
                   Check this
                 </span>
               )}
-              {showSync && !s.converting && !s.rejected && !s.working && (
+              {showSync && !s.converting && !s.rejected && !s.working && !s.send && (
                 s.syncError ? (
                   <span className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-red-700 px-1 py-0.5 text-[9px] font-semibold text-white" title={s.syncError}>
                     Upload failed
@@ -174,6 +180,33 @@ export function PhotoPicker({
                 ) : (
                   <span className="absolute bottom-1 left-1 rounded-sm bg-white/90 px-1 text-[9px] font-semibold text-emerald-700">Saved</span>
                 )
+              )}
+              {s.send?.state === 'sending' && (
+                <span className="absolute inset-0 grid place-items-center bg-white/75 text-[10px] font-semibold text-neutral-700">Sending…</span>
+              )}
+              {s.send?.state === 'waiting' && (
+                <span className="absolute inset-x-0 bottom-0 bg-[#2F4C69] px-1 py-0.5 text-center text-[9px] font-semibold text-white"
+                  title="Waiting for the new design to be created in Library">
+                  In New design
+                </span>
+              )}
+              {s.send?.state === 'failed' && (
+                <span className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-red-700 px-1 py-0.5 text-[9px] font-semibold text-white"
+                  title={s.send.message}>
+                  Not sent
+                  {select?.onRetry && (
+                    <button type="button" onClick={() => select.onRetry!(s.id)} aria-label={`Retry sending photo ${i + 1}`}
+                      className="underline underline-offset-2">Retry</button>
+                  )}
+                </span>
+              )}
+              {select && !s.rejected && (
+                <label className="absolute left-1 top-1 grid h-6 w-6 cursor-pointer place-items-center rounded-sm bg-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.15)]"
+                  title="Select for Send to">
+                  <input type="checkbox" checked={ticked} onChange={() => select.toggle(s.id)}
+                    aria-label={`Select photo ${i + 1}`}
+                    className="h-4 w-4 cursor-pointer accent-[#2F4C69]" />
+                </label>
               )}
               {i === 0 && !hasMain && !noMain && !isBusySlot(s) && !s.rejected && (
                 <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9.5px] font-semibold uppercase tracking-wide text-white">
@@ -202,6 +235,13 @@ export function PhotoPicker({
                   <X className="h-3 w-3" strokeWidth={2.5} />
                 </button>
               </div>
+            </div>
+            {s.sent && (
+              <p className="mt-1 line-clamp-2 text-[10px] leading-tight text-[#2F4C69]" title={s.sent}>{s.sent}</p>
+            )}
+            {s.send?.state === 'failed' && s.send.message && (
+              <p className="mt-1 line-clamp-2 text-[10px] leading-tight text-red-700" title={s.send.message}>{s.send.message}</p>
+            )}
             </div>
           );
         })}

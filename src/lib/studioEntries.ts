@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc,
+  collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, runTransaction,
   serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -305,4 +305,35 @@ export async function discardDraft(kind: EntryKind, id: string, by: Actor): Prom
   await setDoc(entryRef(kind, id), {
     deleted: true, deletedAt: serverTimestamp(), deletedBy: by.email || 'studio',
   }, { merge: true });
+}
+
+// ─── Send to (from Background Removal) ──────────────────────────────────────
+
+/**
+ * Adds already uploaded photos to the end of an entry, draft or saved. Read
+ * and written in one transaction, so photos added elsewhere in the meantime
+ * are kept. Used only when that entry is not open in a dialog (an open
+ * dialog takes the photos itself, or its autosave would write over them).
+ */
+export async function appendEntryPhotos(kind: EntryKind, id: string, photos: EntryPhoto[], by: Actor): Promise<StudioEntry> {
+  const r = entryRef(kind, id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(r);
+    if (!snap.exists()) throw new Error('That entry no longer exists.');
+    const old = Array.isArray(snap.data().photos) ? (snap.data().photos as EntryPhoto[]) : [];
+    tx.update(r, { photos: [...old, ...cleanPhotos(photos)], updatedAt: serverTimestamp(), updatedBy: by.email || 'studio' });
+  });
+  return (await getEntry(kind, id))!;
+}
+
+/**
+ * A new draft holding these photos, customer still to choose, dated today.
+ * Used when another entry is open in the destination tab, so the New entry
+ * dialog cannot be opened over it.
+ */
+export async function createDraftWithPhotos(kind: EntryKind, id: string, photos: EntryPhoto[], by: Actor): Promise<StudioEntry> {
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  await saveEntryFields(kind, id, { customerName: '', customerCode: null, date, note: '', photos }, by, true);
+  return (await getEntry(kind, id))!;
 }

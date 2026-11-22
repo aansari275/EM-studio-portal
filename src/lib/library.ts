@@ -4,7 +4,7 @@ import {
 import { db } from './firebase';
 import { parseSlideLayout } from './deckSlots';
 import {
-  getShowroomProducts, searchShowroomProducts, searchShowroomPage, getDesignVariants,
+  getShowroomProducts, searchShowroomProducts, searchShowroomPage, getDesignVariants, mapShowroomData,
   type ShowroomProduct,
 } from './firebase';
 
@@ -259,4 +259,16 @@ export async function getLibraryCount(): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+/** A design as stored right now, from whichever collection it came from. */
+export async function freshDesign(p: ShowroomProduct): Promise<ShowroomProduct> {
+  if (p.id.startsWith('em:')) {
+    const snap = await getDoc(doc(db, EM, p.id.slice(3)));
+    if (!snap.exists()) throw new Error('That archive design no longer exists.');
+    return mapEm(snap.id, snap.data());
+  }
+  const snap = await getDoc(doc(db, 'showroom_products', p.id));
+  if (!snap.exists()) throw new Error(`No design at showroom_products/${p.id}.`);
+  return mapShowroomData(snap.id, snap.data());
 }

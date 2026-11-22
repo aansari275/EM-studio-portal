@@ -35,8 +35,11 @@ export function NewProduct({
   onClose,
   onCreated,
   onOpenExisting,
+  incoming,
 }: {
   initial?: NewProductInitial;
+  /** Photos sent from Background Removal: each new `nonce` adds its tiles once. */
+  incoming?: { nonce: number; slots: Slot[] } | null;
   variantOf?: ShowroomProduct;
   onClose: () => void;
   onCreated: (p: ShowroomProduct) => void;
@@ -57,6 +60,11 @@ export function NewProduct({
   const [materials, setMaterials] = useState<string[]>(() => splitMaterials(start?.materials));
   const copying = !variantOf && !!(initial && Object.values(initial).some(Boolean));
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [seenIncoming, setSeenIncoming] = useState<number | null>(null);
+  if (incoming && incoming.nonce !== seenIncoming) {
+    setSeenIncoming(incoming.nonce);
+    setSlots((cur) => [...cur, ...incoming.slots]);
+  }
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const qc = useQueryClient();

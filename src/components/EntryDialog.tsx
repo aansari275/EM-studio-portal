@@ -40,11 +40,19 @@ const lineCls =
 type Confirm = { title: string; message: string; confirmLabel: string; cancelLabel?: string; danger?: boolean; run: () => void };
 
 export function EntryDialog({
-  kind, entry, customers, customersLoading, onAddCustomer, onClose, onSaved, onChanged, onDeleted, onDiscarded,
+  kind, entry, presetId, incoming, customers, customersLoading, onAddCustomer, onClose, onSaved, onChanged, onDeleted, onDiscarded,
 }: {
   kind: EntryKind;
   /** Absent for a new entry. A draft or a saved entry otherwise. */
   entry?: StudioEntry;
+  /** The id a new entry is created under (Send to uploads into its folder first). */
+  presetId?: string;
+  /**
+   * Photos sent here from Background Removal, already uploaded into this
+   * entry's folder. Each new `nonce` adds its tiles once, also while the
+   * dialog is already open.
+   */
+  incoming?: { nonce: number; slots: Slot[] } | null;
   customers: Customer[];
   customersLoading?: boolean;
   onAddCustomer: (name: string) => Promise<void>;
@@ -59,7 +67,7 @@ export function EntryDialog({
   onDiscarded: (id: string) => void;
 }) {
   const [mode] = useState<'new' | 'draft' | 'saved'>(() => (!entry ? 'new' : entry.status));
-  const [id] = useState(() => entry?.id || newEntryId(kind));
+  const [id] = useState(() => entry?.id || presetId || newEntryId(kind));
   const [created, setCreated] = useState(!!entry);
   const createdRef = useRef(!!entry); // read by the save callbacks, which can run back to back
   const actor = useMemo<Actor>(() => currentActor() || { uid: '', email: 'studio' }, []);
@@ -75,6 +83,13 @@ export function EntryDialog({
   const [initial] = useState<Slot[]>(() => (mode === 'draft' ? placeholderSlots(entry!.photos) : []));
   const [slots, setSlots] = useState<Slot[]>(initial);
   useEffect(() => { fillSavedSlots(initial, setSlots); }, [initial]);
+  // Photos sent from Background Removal join the tiles (they are already in
+  // the cloud, so they save with the next autosave and need no upload).
+  const [seenIncoming, setSeenIncoming] = useState<number | null>(null);
+  if (incoming && incoming.nonce !== seenIncoming) {
+    setSeenIncoming(incoming.nonce);
+    setSlots((cur) => [...cur, ...incoming.slots]);
+  }
 
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');

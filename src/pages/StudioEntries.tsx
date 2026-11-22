@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, X } from 'lucide-react';
 import { EntryDialog } from '../components/EntryDialog';
 import {
-  listEntries, listCustomers, restoreEntry, sortEntries, formatDate, discardDraft, type EntryKind, type StudioEntry,
+  listEntries, listCustomers, restoreEntry, sortEntries, formatDate, discardDraft, newEntryId, getEntry,
+  appendEntryPhotos, createDraftWithPhotos, type EntryKind, type EntryPhoto, type StudioEntry,
 } from '../lib/studioEntries';
+import { savedPhotos, type Slot } from '../lib/photoSlots';
+import { useDeliveries, type Delivery } from '../lib/sendTo';
 import { currentActor } from '../lib/auth';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { addStudioCustomer } from '../lib/options';
@@ -27,7 +30,8 @@ const COPY: Record<EntryKind, { title: string; blurb: string; empty: string }> =
   },
 };
 
-type Open = { mode: 'new' } | { mode: 'open'; id: string } | null;
+type Open = { mode: 'new'; id: string } | { mode: 'open'; id: string } | null;
+type Incoming = { nonce: number; forId: string; slots: Slot[] };
 
 export function StudioEntries({ kind }: { kind: EntryKind }) {
   const qc = useQueryClient();
@@ -36,6 +40,8 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
   const [open, setOpen] = useState<Open>(null);
   const [undo, setUndo] = useState<StudioEntry | null>(null);
   const [undoError, setUndoError] = useState('');
+  const [incoming, setIncoming] = useState<Incoming | null>(null);
+  const [notice, setNotice] = useState<{ text: string; id?: string; error?: boolean } | null>(null);
 
   const key = ['studio-entries', kind];
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
@@ -70,6 +76,54 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
   const drop = (e: StudioEntry) =>
     qc.setQueryData<StudioEntry[]>(key, (cur) => (cur || []).filter((x) => x.id !== e.id));
 
+  // Photos sent from Background Removal. The dialog open for that entry takes
+  // them itself; with no dialog open, the entry opens with them (New entry for
+  // a new one); with a different entry open, they are written straight to the
+  // entry (or a new draft) and a note says so, rather than closing her work.
+  const openRef = useRef<Open>(open);
+  useEffect(() => { openRef.current = open; }, [open]);
+  const onDelivery = useCallback((d: Delivery) => {
+    if (d.to !== kind) return;
+    const cur = openRef.current;
+    const give = (forId: string) => setIncoming({ nonce: Date.now() + Math.random(), forId, slots: d.slots });
+    if (cur && cur.id === d.entryId) { give(d.entryId); return; }
+    const n = d.slots.length;
+    const photos = savedPhotos(d.slots) as EntryPhoto[];
+    const by = currentActor() || { uid: '', email: 'studio' };
+    const put = (e: StudioEntry) => qc.setQueryData<StudioEntry[]>(['studio-entries', kind],
+      (list) => sortEntries([...(list || []).filter((x) => x.id !== e.id), e]));
+    void (async () => {
+      try {
+        if (cur) {
+          const e = d.isNew
+            ? await createDraftWithPhotos(kind, d.entryId, photos, by)
+            : await appendEntryPhotos(kind, d.entryId, photos, by);
+          put(e);
+          setNotice({
+            text: d.isNew
+              ? `${n} photo${n > 1 ? 's' : ''} from Background Removal saved as a new draft. It is under Drafts.`
+              : `${n} photo${n > 1 ? 's' : ''} from Background Removal added to ${e.customerName || 'a draft'}, ${formatDate(e.date)}.`,
+            id: e.id,
+          });
+          return;
+        }
+        const e = d.isNew ? null : await getEntry(kind, d.entryId);
+        if (e && !e.deleted) {
+          put(e);
+          openRef.current = { mode: 'open', id: e.id };
+          setOpen({ mode: 'open', id: e.id });
+        } else {
+          openRef.current = { mode: 'new', id: d.entryId };
+          setOpen({ mode: 'new', id: d.entryId });
+        }
+        give(d.entryId);
+      } catch (err) {
+        setNotice({ text: `Could not add the photos here: ${err instanceof Error ? err.message : 'unknown error'}. They are still in Background Removal.`, error: true });
+      }
+    })();
+  }, [kind, qc]);
+  useDeliveries(kind, onDelivery);
+
   async function addCustomer(name: string) {
     await addStudioCustomer(name);
     qc.invalidateQueries({ queryKey: ['studio-customers'] });
@@ -95,11 +149,24 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
             <h1 className="font-serif text-[26px] font-normal">{copy.title}</h1>
             <p className="mt-1 text-[13.5px] text-neutral-500">{copy.blurb}</p>
           </div>
-          <button type="button" onClick={() => setOpen({ mode: 'new' })}
+          <button type="button" onClick={() => setOpen({ mode: 'new', id: newEntryId(kind) })}
             className="flex items-center gap-1.5 rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white">
             <Plus className="h-4 w-4" strokeWidth={2.5} /> New entry
           </button>
         </div>
+
+        {notice && (
+          <div role="status" className={'mt-5 flex flex-wrap items-center gap-3 border-l-2 px-4 py-2.5 text-[13px] ' +
+            (notice.error ? 'border-red-700 bg-red-50 text-red-800' : 'border-[#2F4C69] bg-neutral-50')}>
+            <span className="flex-1">{notice.text}</span>
+            {notice.id && !open && (
+              <button type="button" onClick={() => { setOpen({ mode: 'open', id: notice.id! }); setNotice(null); }}
+                className="font-semibold text-[#2F4C69] hover:underline">Open</button>
+            )}
+            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss"
+              className="rounded p-1 text-neutral-400 hover:text-neutral-900"><X className="h-4 w-4" /></button>
+          </div>
+        )}
 
         {drafts.length > 0 && (
           <section aria-labelledby="drafts-title" className="mt-7 rounded-md border border-[#98671A]/30 bg-[#98671A]/[0.04] px-4 py-4">
@@ -226,22 +293,25 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
 
       {open && (open.mode === 'new' || opened) && (
         <EntryDialog
-          key={open.mode === 'new' ? 'new' : `${open.id}-${opened?.status}`}
+          key={open.mode === 'new' ? `new-${open.id}` : `${open.id}-${opened?.status}`}
           kind={kind}
           entry={opened}
+          presetId={open.mode === 'new' ? open.id : undefined}
+          incoming={incoming && incoming.forId === open.id ? incoming : null}
           customers={customersQ.data || []}
           customersLoading={customersQ.isLoading}
           onAddCustomer={addCustomer}
-          onClose={() => setOpen(null)}
+          onClose={() => { setOpen(null); setIncoming(null); }}
           onSaved={(e) => {
             put(e);
+            setIncoming(null); // taken by the draft; the saved entry must not add it again
             setUndo(null);
             // the saved entry opens straight away, so she sees what was saved
             setOpen({ mode: 'open', id: e.id });
           }}
           onChanged={put}
-          onDeleted={(e) => { drop(e); setUndo(e); setOpen(null); }}
-          onDiscarded={(id) => { qc.setQueryData<StudioEntry[]>(key, (cur) => (cur || []).filter((x) => x.id !== id)); setOpen(null); }}
+          onDeleted={(e) => { drop(e); setUndo(e); setOpen(null); setIncoming(null); }}
+          onDiscarded={(id) => { qc.setQueryData<StudioEntry[]>(key, (cur) => (cur || []).filter((x) => x.id !== id)); setOpen(null); setIncoming(null); }}
         />
       )}
 

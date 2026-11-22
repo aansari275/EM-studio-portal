@@ -39,6 +39,12 @@ export type Slot = {
   remoteOriginalFor?: File;
   syncing?: boolean;
   syncError?: string;
+
+  // Send to (Background Removal only).
+  /** Being sent, waiting for the destination (New design not created yet), or failed with the reason. */
+  send?: { state: 'sending' | 'waiting' | 'failed'; message?: string };
+  /** Where it was sent, for the note under the tile: "Sent to Custom Rugs, ABC, 22 Nov". */
+  sent?: string;
 };
 
 /** A file in Storage. */
@@ -117,7 +123,7 @@ export function savedPhotos(slots: Slot[]): SavedPhoto[] {
   }));
 }
 
-async function fetchFile(url: string, name: string): Promise<File> {
+export async function fetchFile(url: string, name: string): Promise<File> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(String(res.status));
   const blob = await res.blob();

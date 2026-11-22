@@ -28,6 +28,8 @@ export interface BgPhoto {
   cut: boolean;
   /** The file is a cutout of the original, same framing (see Slot.cutOfOriginal). */
   cutOfOriginal?: boolean;
+  /** Where it was sent with Send to, shown under the tile. */
+  sent?: string;
   updatedAt: string;
 }
 

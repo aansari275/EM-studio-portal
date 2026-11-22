@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { Search, Check, X, Plus, Copy, Pencil, Trash2, RotateCw } from 'lucide-react';
@@ -26,6 +26,8 @@ import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
 import { useTabActive } from '../lib/tabContext';
+import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
+import type { Slot } from '../lib/photoSlots';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -57,6 +59,10 @@ export function Library() {
   // The design a new colour variant is being added to.
   const [addingVariant, setAddingVariant] = useState<ShowroomProduct | null>(null);
   const [editing, setEditing] = useState<ShowroomProduct | null>(null);
+  // Photos sent from Background Removal into New design, and who to tell
+  // when the design is created (or the form is closed without creating it).
+  const [incoming, setIncoming] = useState<{ nonce: number; slots: Slot[] } | null>(null);
+  const waiting = useRef<Extract<LibraryDelivery, { action: 'new' }>[]>([]);
   // The last design deleted, offered back for a few seconds.
   const [undo, setUndo] = useState<ShowroomProduct | null>(null);
   const tray = useSelection();
@@ -86,6 +92,26 @@ export function Library() {
     qc.invalidateQueries({ queryKey: ['library'] });
     qc.invalidateQueries({ queryKey: ['variants'] });
   }
+
+  const onDelivery = useCallback((d: Delivery) => {
+    if (d.to !== 'library') return;
+    if (d.action === 'open') {
+      setOpen(d.product);
+      qc.invalidateQueries({ queryKey: ['library'] });
+      qc.invalidateQueries({ queryKey: ['variants'] });
+      return;
+    }
+    waiting.current.push(d);
+    setCreating((c) => c || {});
+    setIncoming({ nonce: Date.now() + Math.random(), slots: d.slots });
+  }, [qc]);
+  useDeliveries('library', onDelivery);
+  const settleWaiting = (p: ShowroomProduct | null) => {
+    const list = waiting.current;
+    waiting.current = [];
+    setIncoming(null);
+    list.forEach((d) => (p ? d.onCreated(p) : d.onCancel()));
+  };
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(term.trim()), 150);
@@ -328,14 +354,16 @@ export function Library() {
       {creating && (
         <NewProduct
           initial={creating}
-          onClose={() => setCreating(null)}
+          incoming={incoming}
+          onClose={() => { setCreating(null); settleWaiting(null); }}
           onCreated={(p) => {
             setCreating(null);
+            settleWaiting(p);
             qc.invalidateQueries({ queryKey: ['library'] });
             qc.invalidateQueries({ queryKey: ['variants'] });
             setOpen(p);
           }}
-          onOpenExisting={(p) => { setCreating(null); setOpen(p); }}
+          onOpenExisting={(p) => { setCreating(null); settleWaiting(null); setOpen(p); }}
         />
       )}
       {addingVariant && (
