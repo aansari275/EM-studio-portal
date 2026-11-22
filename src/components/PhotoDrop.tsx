@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { addProductPhotos, type ShowroomProduct } from '../lib/firebase';
+import { ACCEPT, normaliseAll } from '../lib/imageIntake';
 
 /**
  * The + tile that sits on the end of a product's thumbnail row.
@@ -23,14 +24,30 @@ export function PhotoDrop({
   const input = useRef<HTMLInputElement>(null);
 
   async function take(list: FileList | null) {
-    const files = [...(list || [])].filter((f) => f.type.startsWith('image/'));
-    if (!files.length) return;
+    const picked = [...(list || [])];
+    if (!picked.length) return;
     setError(''); setBusy('…');
+    // Photo intake first: HEIC, TIFF, WebP, RAW previews... become JPEG or PNG.
+    const done: (File | null)[] = picked.map(() => null);
+    const problems: string[] = [];
+    let n = 0;
+    await normaliseAll(picked, (i, r) => {
+      if (r.ok) done[i] = r.file; else problems.push(r.error);
+      setBusy(`${++n}/${picked.length}`);
+    });
+    const files = done.filter((f): f is File => !!f); // in the order she picked them
+    if (!files.length) {
+      setError(problems.join(' '));
+      setBusy('');
+      if (input.current) input.current.value = '';
+      return;
+    }
     try {
       const updated = await addProductPhotos(product, files, (done, total) =>
         setBusy(`${done}/${total}`)
       );
       onUploaded(updated);
+      if (problems.length) setError(problems.join(' '));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.');
     } finally {
@@ -61,7 +78,7 @@ export function PhotoDrop({
           <Plus className="h-4 w-4 text-neutral-400" strokeWidth={2} />
         )}
       </button>
-      <input ref={input} type="file" accept="image/*" multiple hidden onChange={(e) => take(e.target.files)} />
+      <input ref={input} type="file" accept={ACCEPT} multiple hidden onChange={(e) => take(e.target.files)} />
       {error && <p className="mt-2 w-full text-[12px] text-red-600">{error}</p>}
     </>
   );

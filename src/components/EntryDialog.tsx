@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Trash2, X } from 'lucide-react';
 import { PhotoPicker, type Slot } from './PhotoPicker';
+import { isBusySlot, isReadySlot } from '../lib/photoSlots';
 import { CustomerPicker } from './CustomerPicker';
 import { Label } from './NewProduct';
 import {
@@ -49,7 +50,8 @@ export function EntryDialog({
   const dirty = !!entry && (
     (customer?.name || '') !== entry.customerName || date !== entry.date || note.trim() !== entry.note
   );
-  const working = slots.some((s) => s.working);
+  const working = slots.some(isBusySlot);
+  const ready = slots.filter(isReadySlot);
 
   const tabActive = useTabActive();
   useEffect(() => {
@@ -74,9 +76,9 @@ export function EntryDialog({
 
   const create = () => run('Saving…', async () => {
     if (!customer) throw new Error('Choose a customer.');
-    if (!slots.length) throw new Error('Add at least one photo.');
+    if (!ready.length) throw new Error('Add at least one photo.');
     if (working) throw new Error('Wait for the backgrounds to finish.');
-    const made = await createEntry(kind, details(), slots.map((s) => s.file), progress);
+    const made = await createEntry(kind, details(), ready.map((s) => s.file), progress);
     onSaved(made);
   });
 
@@ -88,7 +90,7 @@ export function EntryDialog({
 
   const upload = () => run('Uploading…', async () => {
     if (working) throw new Error('Wait for the backgrounds to finish.');
-    const next = await addEntryPhotos(kind, entry!.id, slots.map((s) => s.file), progress);
+    const next = await addEntryPhotos(kind, entry!.id, ready.map((s) => s.file), progress);
     setSlots([]);
     if (next) { onSaved(next); setViewing(next.photos.length - 1); }
   });
@@ -199,10 +201,10 @@ export function EntryDialog({
             <div className="mt-2">
               <PhotoPicker slots={slots} onChange={setSlots} disabled={!!busy} noMain />
             </div>
-            {!isNew && slots.length > 0 && (
+            {!isNew && ready.length > 0 && (
               <button type="button" onClick={upload} disabled={!!busy || working}
                 className="mt-3 rounded-sm border border-[#2F4C69] px-3.5 py-1.5 text-[12.5px] font-semibold text-[#2F4C69] hover:bg-[#2F4C69]/5 disabled:opacity-50">
-                Upload {slots.length} photo{slots.length > 1 ? 's' : ''}
+                Upload {ready.length} photo{ready.length > 1 ? 's' : ''}
               </button>
             )}
           </div>
@@ -214,7 +216,7 @@ export function EntryDialog({
           {isNew ? (
             <>
               <p className="flex-1 text-[12.5px] text-neutral-400">
-                {busy || (slots.length ? `${slots.length} photo${slots.length > 1 ? 's' : ''} ready.` : 'Add at least one photo.')}
+                {busy || (ready.length ? `${ready.length} photo${ready.length > 1 ? 's' : ''} ready.` : 'Add at least one photo.')}
               </p>
               <button onClick={onClose} disabled={!!busy} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
               <button onClick={create} disabled={!!busy || working}

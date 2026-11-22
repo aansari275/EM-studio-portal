@@ -8,6 +8,7 @@ import {
 import { getLibraryVariants } from '../lib/library';
 import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } from '../lib/options';
 import { PhotoPicker } from './PhotoPicker';
+import { isBusySlot, isReadySlot, type Slot } from '../lib/photoSlots';
 import { useTabActive } from '../lib/tabContext';
 
 /**
@@ -55,7 +56,7 @@ export function NewProduct({
   // Stored as one comma separated string; the form edits one row per material.
   const [materials, setMaterials] = useState<string[]>(() => splitMaterials(start?.materials));
   const copying = !variantOf && !!(initial && Object.values(initial).some(Boolean));
-  const [slots, setSlots] = useState<{ file: File; original?: File }[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const qc = useQueryClient();
@@ -153,7 +154,7 @@ export function NewProduct({
       );
       // Photos are uploaded only once the design exists, so a cancelled entry
       // never leaves orphan files behind in storage.
-      const photos = slots.map((s) => s.file);
+      const photos = slots.filter(isReadySlot).map((s) => s.file);
       if (photos.length) {
         created = await addProductPhotos(created, photos, (done, total) =>
           setBusy(done === total ? 'Finishing…' : `Uploading ${done + 1} of ${total}…`)
@@ -296,12 +297,14 @@ export function NewProduct({
           <p className="flex-1 text-[12.5px] text-neutral-400">
             {duplicate
               ? 'Creating it adds a second design with this number.'
-              : slots.length
-                ? `${slots.length} photo${slots.length > 1 ? 's' : ''} ready. The first is the main one.`
+              : slots.some(isBusySlot)
+                ? 'Opening photos…'
+                : slots.filter(isReadySlot).length
+                ? `${slots.filter(isReadySlot).length} photo${slots.filter(isReadySlot).length > 1 ? 's' : ''} ready. The first is the main one.`
                 : 'Add as many photos as you like, or add them later.'}
           </p>
           <button onClick={onClose} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
-          <button onClick={save} disabled={!!busy}
+          <button onClick={save} disabled={!!busy || slots.some(isBusySlot)}
             className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
             {busy || (variantOf ? 'Create colourway' : 'Create design')}
           </button>

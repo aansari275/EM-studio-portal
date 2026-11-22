@@ -3,6 +3,8 @@ import { Download, ImagePlus } from 'lucide-react';
 import { PhotoPicker, type Slot } from '../components/PhotoPicker';
 import { saveBlob, saveZip, today } from '../lib/download';
 import { useTabGuard } from '../lib/tabContext';
+import { ACCEPT } from '../lib/imageIntake';
+import { addFilesAsSlots, isBusySlot, isReadySlot } from '../lib/photoSlots';
 
 /**
  * Background removal on its own page, for photos that are not going into the
@@ -14,21 +16,19 @@ export function BackgroundRemoval() {
   const [zipping, setZipping] = useState(false);
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
-  const busy = slots.some((s) => s.working);
+  const busy = slots.some(isBusySlot);
+  const ready = slots.filter(isReadySlot);
   useTabGuard(slots.length
     ? `The ${slots.length === 1 ? 'photo' : `${slots.length} photos`} on this page will be lost unless you download ${slots.length === 1 ? 'it' : 'them'} first.`
     : null);
 
-  const add = (list: FileList | null) => {
-    const picked = [...(list || [])].filter((f) => f.type.startsWith('image/'));
-    if (picked.length) setSlots((cur) => [...cur, ...picked.map((file) => ({ file }))]);
-  };
+  const add = (list: FileList | null) => addFilesAsSlots(list, setSlots);
 
   async function downloadAll() {
     setZipping(true);
     setError('');
     try {
-      await saveZip(slots.map((s) => ({ name: s.file.name, blob: s.file })), `photos-${today()}.zip`);
+      await saveZip(ready.map((s) => ({ name: s.file.name, blob: s.file })), `photos-${today()}.zip`);
     } catch {
       setError('Could not make the zip. Try downloading the photos one at a time.');
     } finally {
@@ -58,7 +58,7 @@ export function BackgroundRemoval() {
             <ImagePlus className="h-7 w-7 text-neutral-400" strokeWidth={1.5} />
             <span className="text-[14px] font-semibold">Drop photos here, or click to choose</span>
             <span className="text-[12.5px] text-neutral-400">Runs on this computer. Nothing is sent anywhere.</span>
-            <input type="file" accept="image/*" multiple className="sr-only" onChange={(e) => add(e.target.files)} />
+            <input type="file" accept={ACCEPT} multiple className="sr-only" onChange={(e) => add(e.target.files)} />
           </label>
         ) : (
           <div className="mt-7">
@@ -69,10 +69,10 @@ export function BackgroundRemoval() {
 
         {slots.length > 0 && (
           <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-neutral-100 pt-5">
-            <button type="button" onClick={downloadAll} disabled={zipping || busy}
+            <button type="button" onClick={downloadAll} disabled={zipping || busy || !ready.length}
               className="flex items-center gap-2 rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
               <Download className="h-4 w-4" strokeWidth={2} />
-              {zipping ? 'Making the zip…' : `Download all (${slots.length})`}
+              {zipping ? 'Making the zip…' : `Download all (${ready.length})`}
             </button>
             <button type="button" disabled={busy}
               onClick={() => window.confirm('Clear all photos from this page? Anything not downloaded is lost.') && setSlots([])}

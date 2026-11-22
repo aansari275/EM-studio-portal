@@ -6,6 +6,7 @@ import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } f
 import { updateProduct, uploadEditPhotos } from '../lib/productEdit';
 import { orderedImages, thumb } from '../lib/img';
 import { PhotoPicker } from './PhotoPicker';
+import { isBusySlot, isReadySlot, type Slot } from '../lib/photoSlots';
 import { Label, Choice, Field } from './NewProduct';
 import { useTabActive } from '../lib/tabContext';
 
@@ -37,7 +38,7 @@ export function EditProduct({
     return list.length ? list : [''];
   });
   const [photos, setPhotos] = useState<string[]>(() => orderedImages(product));
-  const [slots, setSlots] = useState<{ file: File; original?: File }[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const qc = useQueryClient();
@@ -70,7 +71,7 @@ export function EditProduct({
     setError('');
     try {
       let added: string[] = [];
-      const files = slots.map((s) => s.file);
+      const files = slots.filter(isReadySlot).map((s) => s.file);
       if (files.length) {
         setBusy(`Uploading 1 of ${files.length}…`);
         added = await uploadEditPhotos(product, files, (done, total) =>
@@ -187,7 +188,7 @@ export function EditProduct({
             Buyer links already sent keep the old version.
           </p>
           <button onClick={onClose} disabled={!!busy} className="text-[13px] text-neutral-500 hover:text-neutral-900">Cancel</button>
-          <button onClick={save} disabled={!!busy}
+          <button onClick={save} disabled={!!busy || slots.some(isBusySlot)}
             className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
             {busy || 'Save changes'}
           </button>
