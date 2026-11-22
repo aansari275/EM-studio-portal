@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   homography, apply, plan, warp, render, applyTone, autoLevels, buildLuts, startQuad,
   hasAlpha, encodingFor, newPx, straightenShrink, insetQuad, estimateAspect, rescalePlan, sampleSteps,
-  isDefaultSettings, TYPICAL_FOCAL, DEFAULT_SETTINGS, NEUTRAL_TONE, type Quad, type Px,
+  isDefaultSettings, TYPICAL_FOCAL, paperReference, autoTone, wbGains, PAPER_TARGET, DEFAULT_SETTINGS, NEUTRAL_TONE, type Quad, type Px,
 } from './photoEdit';
 
 const close = (a: number, b: number, eps = 1e-6) => expect(Math.abs(a - b)).toBeLessThan(eps);
@@ -373,5 +373,166 @@ describe('rug sizes', () => {
     expect(orientSize({ a: 5, b: 8 }, false)).toEqual([5, 8]);
     expect(orientSize({ a: 5, b: 8 }, true)).toEqual([8, 5]);
     expect(ratioText(0.625)).toBe('1 : 1.60');
+  });
+});
+
+describe('auto tone', () => {
+  const lum = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  /** Runs one colour through a tone, as applyTone would. */
+  const toned = (c: [number, number, number], t: typeof NEUTRAL_TONE) => {
+    const out = applyTone(img(1, 1, () => [...c, 255]), t).data;
+    return [out[0], out[1], out[2]] as [number, number, number];
+  };
+  // deterministic texture, +-n
+  const jitter = (x: number, y: number, n: number) => (((x * 73856093) ^ (y * 19349663)) >>> 0) % (2 * n + 1) - n;
+
+  const W = 200, H = 150;
+  const inRug = (x: number, y: number) => x >= 60 && x < 140 && y >= 40 && y < 110;
+  /** A dark brown rug on slightly blue, underexposed white paper, plus its cutout. */
+  function scene(rug: [number, number, number], paper: [number, number, number], clutter = false) {
+    const orig = img(W, H, (x, y) => {
+      if (inRug(x, y)) { const j = jitter(x, y, 8); return [rug[0] + j, rug[1] + j, rug[2] + j, 255]; }
+      if (clutter) {
+        if (x < 40 && y < 60) return [230, 120, 170, 255]; // pink bag
+        if (x >= 160 && y < 50) return [200, 185, 160, 255]; // beige box
+        if (y >= 130 && x < 100) return [95, 95, 100, 255]; // grey shadow
+        if (x >= 170 && y >= 120) return [255, 255, 255, 255]; // lamp, clipped
+        if (x < 30 && y >= 100) return [120, 70, 40, 255]; // brown carton
+      }
+      const j = jitter(x, y, 3);
+      return [paper[0] + j, paper[1] + j, paper[2] + j, 255];
+    });
+    const cut = img(W, H, (x, y) => {
+      const i = (y * W + x) * 4;
+      return inRug(x, y) ? [orig.data[i], orig.data[i + 1], orig.data[i + 2], 255] : [0, 0, 0, 0];
+    });
+    return { orig, cut };
+  }
+  const tone = (r: ReturnType<typeof autoTone>) => ({ ...NEUTRAL_TONE, ...r.patch });
+
+  it('neutralises a blue, underexposed paper floor and keeps a dark rug dark', () => {
+    const rug: [number, number, number] = [70, 46, 30];
+    const paper: [number, number, number] = [196, 200, 218];
+    const { orig, cut } = scene(rug, paper);
+    const pr = paperReference(orig, cut);
+    expect('ref' in pr).toBe(true);
+    if (!('ref' in pr)) return;
+    expect(Math.abs(pr.ref.r - paper[0])).toBeLessThanOrEqual(3);
+    expect(Math.abs(pr.ref.b - paper[2])).toBeLessThanOrEqual(3);
+    const a = autoTone(cut, pr.ref);
+    expect(a.method).toBe('paper');
+    expect(a.patch.black).toBe(0);
+    expect(a.patch.gamma).toBe(1);
+    const t = tone(a);
+    const p = toned(paper, t);
+    // the floor is neutral and near white, not clipped
+    expect(Math.max(...p) - Math.min(...p)).toBeLessThanOrEqual(3);
+    expect(lum(...p)).toBeGreaterThanOrEqual(234);
+    expect(lum(...p)).toBeLessThanOrEqual(243);
+    expect(Math.max(...p)).toBeLessThan(250);
+    // the rug moved by the same global gain only: still dark, still brown
+    const r = toned(rug, t);
+    const gain = lum(...p) / lum(...paper);
+    expect(lum(...r) / lum(...rug)).toBeGreaterThan(gain * 0.93);
+    expect(lum(...r) / lum(...rug)).toBeLessThan(gain * 1.07);
+    expect(lum(...r)).toBeLessThan(70);
+    expect(r[0]).toBeGreaterThan(r[1]);
+    expect(r[1]).toBeGreaterThan(r[2]);
+    // nothing else is stretched: the black point did not crush, midtones untouched
+    expect(lum(...toned([20, 14, 10], t))).toBeGreaterThan(14);
+  });
+
+  it('clutter, shadows, lamps and coloured objects do not hijack the floor', () => {
+    const paper: [number, number, number] = [210, 212, 220];
+    const { orig, cut } = scene([70, 46, 30], paper, true);
+    const pr = paperReference(orig, cut);
+    expect('ref' in pr).toBe(true);
+    if (!('ref' in pr)) return;
+    expect(Math.abs(pr.ref.r - paper[0])).toBeLessThanOrEqual(3);
+    expect(Math.abs(pr.ref.g - paper[1])).toBeLessThanOrEqual(3);
+    expect(Math.abs(pr.ref.b - paper[2])).toBeLessThanOrEqual(3);
+  });
+
+  it('does not blow out a pale rug on white paper', () => {
+    const rug: [number, number, number] = [228, 220, 200];
+    const paper: [number, number, number] = [226, 228, 232];
+    const { orig, cut } = scene(rug, paper);
+    const pr = paperReference(orig, cut);
+    if (!('ref' in pr)) throw new Error('expected a floor');
+    const t = tone(autoTone(cut, pr.ref));
+    const out = applyTone(cut, t);
+    let top = 0;
+    for (let i = 0; i < out.data.length; i += 4) {
+      if (out.data[i + 3] < 16) continue;
+      top = Math.max(top, out.data[i], out.data[i + 1], out.data[i + 2]);
+    }
+    expect(top).toBeLessThanOrEqual(252);
+    // and it stays pale and warm, not shifted
+    const r = toned(rug, t);
+    expect(lum(...r)).toBeGreaterThan(lum(...rug) * 0.97);
+    expect(r[0]).toBeGreaterThan(r[2]);
+  });
+
+  it('does not use a floor that is too small, too dark or coloured', () => {
+    // almost all rug: few background pixels
+    const small = img(100, 100, (x, y) => (x > 0 && y > 0 && x < 99 && y < 99 ? [70, 46, 30, 255] : [220, 220, 225, 255]));
+    const smallCut = img(100, 100, (x, y) => (x > 0 && y > 0 && x < 99 && y < 99 ? [70, 46, 30, 255] : [0, 0, 0, 0]));
+    expect(paperReference(small, smallCut)).toEqual({ miss: 'few' });
+    const dark = scene([70, 46, 30], [100, 100, 104]);
+    expect(paperReference(dark.orig, dark.cut)).toEqual({ miss: 'dark' });
+    const yellow = scene([70, 46, 30], [225, 215, 190]);
+    expect(paperReference(yellow.orig, yellow.cut)).toEqual({ miss: 'coloured' });
+  });
+
+  it('without a floor, moves a dark low-contrast photo only a little and never changes hue', () => {
+    const src = img(120, 80, (x, y) => {
+      const v = 30 + ((x + y) % 40);
+      return [v + 20, v + 6, v, 255];
+    });
+    const a = autoTone(src, null);
+    expect(a.method).toBe('small');
+    expect(a.note).toMatch(/Small correction only/);
+    expect(a.patch.warmth).toBeUndefined();
+    expect(a.patch.tint).toBeUndefined();
+    expect(a.patch.white).toBeGreaterThanOrEqual(230);
+    expect(a.patch.black).toBeLessThanOrEqual(8);
+    expect(a.patch.gamma).toBe(1);
+    const out = applyTone(src, { ...NEUTRAL_TONE, ...a.patch });
+    let before = 0, after = 0;
+    for (let i = 0; i < src.data.length; i += 4) {
+      for (let c = 0; c < 3; c++) expect(Math.abs(out.data[i + c] - src.data[i + c])).toBeLessThanOrEqual(10);
+      before += lum(src.data[i], src.data[i + 1], src.data[i + 2]);
+      after += lum(out.data[i], out.data[i + 1], out.data[i + 2]);
+      // hue order kept
+      expect(out.data[i]).toBeGreaterThanOrEqual(out.data[i + 1]);
+      expect(out.data[i + 1]).toBeGreaterThanOrEqual(out.data[i + 2]);
+    }
+    expect(after / before).toBeGreaterThan(0.9);
+    expect(after / before).toBeLessThan(1.12);
+  });
+
+  it('a well exposed photo is left alone by the fallback', () => {
+    // real blacks and whites in it (a black border, a white label)
+    const src = img(50, 50, (x, y) => {
+      if (x < 3) return [0, 0, 0, 255];
+      if (x > 46) return [255, 255, 255, 255];
+      const v = Math.round(((x + y) / 98) * 255); return [v, v, v, 255];
+    });
+    expect(autoTone(src, null).patch).toEqual({ black: 0, white: 255, gamma: 1 });
+  });
+
+  it('white balance is a gain: black stays black, the hue of a dark colour does not shift', () => {
+    const [gr, gg, gb] = wbGains(60, -30);
+    expect(gr).toBeGreaterThan(1);
+    expect(gb).toBeLessThan(1);
+    expect(gg).toBeGreaterThan(1);
+    const t = { ...NEUTRAL_TONE, warmth: 60, tint: -30 };
+    expect(toned([0, 0, 0], t)).toEqual([0, 0, 0]);
+    // a dark grey moves in proportion (a few levels), not by a fixed offset
+    const d = toned([20, 20, 20], t);
+    expect(Math.abs(d[0] - 20 * gr)).toBeLessThanOrEqual(1);
+    expect(Math.abs(d[2] - 20 * gb)).toBeLessThanOrEqual(1);
+    expect(Math.max(...d) - Math.min(...d)).toBeLessThanOrEqual(5);
+    expect(PAPER_TARGET).toBeGreaterThanOrEqual(235);
   });
 });

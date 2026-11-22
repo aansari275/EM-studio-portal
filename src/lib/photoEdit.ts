@@ -30,7 +30,14 @@ export interface Tone {
   brightness: number;
   contrast: number;
   saturation: number;
+  /**
+   * White balance, -100..100, 0 is neutral. Warmth scales red up and blue down
+   * (and the reverse below 0); tint scales green down (magenta) above 0 and up
+   * (green) below 0. Both are gains, applied before levels, so they move a
+   * dark colour in proportion and do not shift the shadows' hue.
+   */
   warmth: number;
+  tint: number;
 }
 
 export interface EditSettings {
@@ -65,7 +72,7 @@ export interface Frame {
 }
 
 export const NEUTRAL_TONE: Tone = {
-  black: 0, white: 255, gamma: 1, brightness: 0, contrast: 0, saturation: 0, warmth: 0,
+  black: 0, white: 255, gamma: 1, brightness: 0, contrast: 0, saturation: 0, warmth: 0, tint: 0,
 };
 
 export const NO_STRETCH = { x: 1, y: 1 } as const;
@@ -442,24 +449,37 @@ export function warp(src: Px, p: Plan, ss = 1): Px {
 
 // ─── Tone ───────────────────────────────────────────────────────────────────
 
-/** One lookup table per channel, folding levels, brightness, contrast and warmth together. */
+/** Warmth or tint at 100 is a gain of 2^0.2 (about 15%) on the channels it moves. */
+export const WB_STOPS = 0.2;
+
+/** The red, green and blue gains for a warmth and tint. */
+export function wbGains(warmth: number, tint: number): [number, number, number] {
+  const w = clamp(warmth, -100, 100) / 100 * WB_STOPS;
+  const t = clamp(tint, -100, 100) / 100 * WB_STOPS;
+  return [Math.pow(2, w), Math.pow(2, -t), Math.pow(2, -w)];
+}
+
+/**
+ * One lookup table per channel, folding white balance (warmth, tint), levels,
+ * brightness and contrast together.
+ */
 export function buildLuts(t: Tone): [Uint8Array, Uint8Array, Uint8Array] {
-  const r = new Uint8Array(256), g = new Uint8Array(256), b = new Uint8Array(256);
   const lo = clamp(t.black, 0, 254);
   const hi = clamp(t.white, lo + 1, 255);
   const gamma = clamp(t.gamma, 0.1, 10);
   const bright = t.brightness / 100 * 0.4;
   const contrast = 1 + clamp(t.contrast, -100, 100) / 100;
-  const warm = t.warmth / 100 * 0.1;
-  for (let v = 0; v < 256; v++) {
-    let x = clamp((v - lo) / (hi - lo), 0, 1);
-    if (gamma !== 1) x = Math.pow(x, 1 / gamma);
-    x = (x + bright - 0.5) * contrast + 0.5;
-    r[v] = Math.round(clamp(x + warm, 0, 1) * 255);
-    g[v] = Math.round(clamp(x, 0, 1) * 255);
-    b[v] = Math.round(clamp(x - warm, 0, 1) * 255);
-  }
-  return [r, g, b];
+  const gains = wbGains(t.warmth, t.tint ?? 0);
+  return gains.map((gain) => {
+    const lut = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) {
+      let x = clamp((Math.min(255, v * gain) - lo) / (hi - lo), 0, 1);
+      if (gamma !== 1) x = Math.pow(x, 1 / gamma);
+      x = (x + bright - 0.5) * contrast + 0.5;
+      lut[v] = Math.round(clamp(x, 0, 1) * 255);
+    }
+    return lut;
+  }) as [Uint8Array, Uint8Array, Uint8Array];
 }
 
 /** Applies the tone settings into a new buffer. Alpha is copied untouched. */
@@ -505,6 +525,186 @@ export function autoLevels(src: Px, loPct = 0.005, hiPct = 0.995): { black: numb
   let white = find(n * hiPct);
   if (white - black < 2) { black = 0; white = 255; }
   return { black, white };
+}
+
+// ─── Auto tone ──────────────────────────────────────────────────────────────
+//
+// Auto corrects the PHOTO (exposure and colour cast), never the rug's own
+// tonal range: a dark, low-contrast rug must stay dark. Stretching the rug's
+// own percentiles to full range (autoLevels above) turned a dark brown rug
+// bright orange-tan, so it is no longer what the Auto button does.
+
+const lumOf = (r: number, g: number, b: number) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/** Where the white floor should land, 0..255: near white, not clipped. */
+export const PAPER_TARGET = 238;
+/** Darker than this (luminance) the "floor" is not white paper, or the photo is too dark to trust. */
+export const PAPER_MIN_LUM = 120;
+/** A floor whose strongest channel is more than this times its weakest is coloured, not a cast. */
+export const PAPER_MAX_CAST = 1.15;
+/** Auto never brightens by more than this. */
+export const AUTO_MAX_GAIN = 1.7;
+/** After Auto, the rug's brightest 0.5% (strongest channel) stays at or under this. */
+export const RUG_HIGHLIGHT_MAX = 250;
+/** Fallback (no floor): the white point never goes below this, the black point never above this. */
+export const FALLBACK_MIN_WHITE = 230;
+export const FALLBACK_MAX_BLACK = 8;
+
+export interface PaperRef {
+  /** Median colour of the floor, 0..255 per channel. */
+  r: number; g: number; b: number;
+  /** How many background pixels qualified as floor. */
+  count: number;
+}
+
+export type PaperMiss = 'few' | 'dark' | 'coloured';
+
+/**
+ * A robust estimate of the white paper floor, from the pixels a cutout
+ * removed. `orig` is the original photo and `mask` the cutout at the same
+ * size (only its alpha is read). Background pixels are those the cutout made
+ * fully transparent and that are not within a few pixels of the rug (its
+ * edge, halo and contact shadow). Of those, only near-grey (low saturation),
+ * unclipped, not-dark pixels qualify, which drops coloured clutter, deep
+ * shadows and lamps. The floor is the per-channel median of the brightest
+ * third of what qualifies, so grey shadows and grey or beige objects lower
+ * down do not drag it.
+ *
+ * Returns why not when too few pixels qualify (under 2% of the frame or 400
+ * pixels), when the floor is too dark to be white paper, or when it is
+ * strongly coloured.
+ */
+export function paperReference(orig: Px, mask: Px): { ref: PaperRef } | { miss: PaperMiss } {
+  const { width: w, height: h } = orig;
+  if (mask.width !== w || mask.height !== h) throw new Error('paperReference: the mask must match the photo.');
+  const od = orig.data, md = mask.data;
+  const gap = Math.max(2, Math.round(Math.max(w, h) * 0.01));
+  const clear = (x: number, y: number) =>
+    x < 0 || y < 0 || x >= w || y >= h || md[(y * w + x) * 4 + 3] < 8;
+  const lumHist = new Uint32Array(256);
+  const keep = new Uint8Array(w * h);
+  let n = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (md[i * 4 + 3] >= 8) continue;
+      if (!clear(x - gap, y) || !clear(x + gap, y) || !clear(x, y - gap) || !clear(x, y + gap)) continue;
+      const r = od[i * 4], g = od[i * 4 + 1], b = od[i * 4 + 2];
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      if (mx >= 253 || mx < 60) continue; // clipped (lamps, glare) or deep shadow
+      if (mx - mn > 0.2 * mx) continue; // coloured (clutter, a beige box, a pink bag)
+      keep[i] = 1;
+      lumHist[Math.round(lumOf(r, g, b))]++;
+      n++;
+    }
+  }
+  if (n < Math.max(400, 0.02 * w * h)) return { miss: 'few' };
+  // the luminance above which the brightest third lies
+  let acc = 0, cut = 255;
+  for (let v = 255; v >= 0; v--) { acc += lumHist[v]; if (acc >= n / 3) { cut = v; break; } }
+  const hr = new Uint32Array(256), hg = new Uint32Array(256), hb = new Uint32Array(256);
+  let m = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (!keep[i]) continue;
+    const r = od[i * 4], g = od[i * 4 + 1], b = od[i * 4 + 2];
+    if (Math.round(lumOf(r, g, b)) < cut) continue;
+    hr[r]++; hg[g]++; hb[b]++; m++;
+  }
+  const median = (hist: Uint32Array) => {
+    let a = 0;
+    for (let v = 0; v < 256; v++) { a += hist[v]; if (a >= m / 2) return v; }
+    return 255;
+  };
+  const ref: PaperRef = { r: median(hr), g: median(hg), b: median(hb), count: n };
+  if (lumOf(ref.r, ref.g, ref.b) < PAPER_MIN_LUM) return { miss: 'dark' };
+  if (Math.max(ref.r, ref.g, ref.b) > PAPER_MAX_CAST * Math.max(1, Math.min(ref.r, ref.g, ref.b))) return { miss: 'coloured' };
+  return { ref };
+}
+
+/** The `q` quantile (0..1) of the strongest channel, after gains, over the opaque pixels of `px`. */
+function channelMaxQuantile(px: Px, gains: [number, number, number], q: number): number {
+  const hist = new Uint32Array(256);
+  const d = px.data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 16) continue;
+    const v = Math.max(d[i] * gains[0], d[i + 1] * gains[1], d[i + 2] * gains[2]);
+    hist[Math.min(255, Math.round(v))]++;
+    n++;
+  }
+  if (!n) return 0;
+  let acc = 0;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc > n * q) return v; }
+  return 255;
+}
+
+export type AutoToneResult = {
+  /** The tone settings Auto sets. Brightness, contrast and saturation are left as they are. */
+  patch: Pick<Tone, 'black' | 'white' | 'gamma'> & Partial<Pick<Tone, 'warmth' | 'tint'>>;
+  method: 'paper' | 'small';
+  /** One line for the editor, saying what Auto used. */
+  note: string;
+  paper?: PaperRef;
+};
+
+/**
+ * Auto for the Tone step.
+ *
+ * With a floor reference (see paperReference): white balance plus exposure.
+ * Warmth and tint make the floor neutral, and the white point puts it at
+ * PAPER_TARGET, black point 0 and midtones untouched, so the rug gets the
+ * same global correction and keeps its own darkness and contrast. The gain is
+ * capped (AUTO_MAX_GAIN), never darkens a floor that is already brighter
+ * than the target, and is eased off if it would push the rug's own
+ * highlights past RUG_HIGHLIGHT_MAX (a pale rug on white paper).
+ *
+ * Without one: a small, hue-free correction from the rug's own range. The
+ * white point never goes below FALLBACK_MIN_WHITE, the black point never above
+ * FALLBACK_MAX_BLACK (nor half the darkest tones), midtones untouched, warmth
+ * and tint left as they are.
+ */
+export function autoTone(rug: Px, paper: PaperRef | null, why: PaperMiss | 'none' = 'none'): AutoToneResult {
+  if (paper) {
+    const { r, g, b } = paper;
+    const warmth = Math.round(clamp((0.5 * Math.log2(b / r)) / WB_STOPS * 100, -100, 100));
+    const [gr, , gb] = wbGains(warmth, 0);
+    const level = (r * gr + b * gb) / 2;
+    const tint = Math.round(clamp((-Math.log2(level / g)) / WB_STOPS * 100, -100, 100));
+    const gains = wbGains(warmth, tint);
+    const floor = lumOf(r * gains[0], g * gains[1], b * gains[2]);
+    let white = Math.min(255, (255 * floor) / PAPER_TARGET);
+    white = Math.max(white, 255 / AUTO_MAX_GAIN);
+    const hi = channelMaxQuantile(rug, gains, 0.995);
+    white = Math.max(white, (255 * hi) / RUG_HIGHLIGHT_MAX);
+    return {
+      patch: { black: 0, white: Math.round(Math.min(255, white)), gamma: 1, warmth, tint },
+      method: 'paper',
+      note: 'Balanced against the white floor.',
+      paper,
+    };
+  }
+  // fallback: the rug's own range, moved only a little
+  const hist = new Uint32Array(256);
+  const d = rug.data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 16) continue;
+    hist[Math.round(lumOf(d[i], d[i + 1], d[i + 2]))]++;
+    n++;
+  }
+  const find = (target: number) => {
+    let acc = 0;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc > target) return v; }
+    return 255;
+  };
+  const lo = n ? find(n * 0.005) : 0;
+  const top = n ? find(n * 0.995) : 255;
+  const white = top >= 250 ? 255 : Math.max(FALLBACK_MIN_WHITE, top);
+  const black = Math.min(FALLBACK_MAX_BLACK, Math.floor(lo / 2));
+  const reason = why === 'dark' ? 'The floor is too dark to use.'
+    : why === 'coloured' ? 'The floor is too coloured to use.'
+    : 'No white floor found.';
+  return { patch: { black, white, gamma: 1 }, method: 'small', note: `Small correction only. ${reason}` };
 }
 
 // ─── Transparency ───────────────────────────────────────────────────────────

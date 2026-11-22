@@ -1,11 +1,11 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import {
-  DEFAULT_SETTINGS, MAX_ANGLE, NEUTRAL_TONE, applyTone, autoLevels, hasAlpha, isDefaultSettings, plan,
+  DEFAULT_SETTINGS, MAX_ANGLE, NEUTRAL_TONE, applyTone, autoTone, hasAlpha, paperReference, isDefaultSettings, plan,
   rescalePlan, sampleSteps, startQuad, warp,
   type EditSettings, type Frame, type Pt, type Px, type Quad, type Rect, type Tone,
 } from '../lib/photoEdit';
-import { decode, encode, headOf, paint, pixelsOf, takeAlpha } from '../lib/canvasImage';
+import { decode, encode, headOf, paint, pixelsAt, pixelsOf, takeAlpha } from '../lib/canvasImage';
 import { jpegFocal35 } from '../lib/imageFormat';
 import { decontaminate } from '../lib/maskRefine';
 import { useTabActive } from '../lib/tabContext';
@@ -66,6 +66,9 @@ export default function PhotoEditor({
   const [settings, setSettings] = useState<EditSettings>(DEFAULT_SETTINGS);
   const [comparing, setComparing] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** What Auto last used, shown under Levels. */
+  const [autoNote, setAutoNote] = useState('');
+  const [autoBusy, setAutoBusy] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
 
   // Decode once. The bitmap is kept for the full size render on Apply.
@@ -141,6 +144,32 @@ export default function PhotoEditor({
       return { w: p.outW, h: p.outH };
     } catch { return null; }
   }, [source, settings, frame]);
+  // Auto corrects the photo, not the rug's own range. On a cutout of a photo
+  // shot on the white paper floor, the floor the cutout removed is the
+  // reference: it is made neutral and near white, and the rug gets the same
+  // correction. Otherwise only a small, hue-free correction.
+  const runAuto = useCallback(async () => {
+    if (!preview || autoBusy) return;
+    setAutoBusy(true);
+    try {
+      let result = null as ReturnType<typeof autoTone> | null;
+      if (full && hasAlpha(preview)) {
+        try {
+          const orig = fullBmp || await decode(full);
+          const ref = paperReference(pixelsAt(orig, preview.width, preview.height), preview);
+          if (orig !== fullBmp) orig.close();
+          result = 'ref' in ref ? autoTone(preview, ref.ref) : autoTone(preview, null, ref.miss);
+        } catch { /* fall back below */ }
+      }
+      if (!result) result = autoTone(geometry || preview, null);
+      const r = result;
+      setSettings((s) => ({ ...s, tone: { ...s.tone, ...r.patch } }));
+      setAutoNote(r.note);
+    } finally {
+      setAutoBusy(false);
+    }
+  }, [preview, geometry, full, fullBmp, autoBusy]);
+
   const shown = useMemo(
     () => (comparing ? preview : geometry && applyTone(geometry, view.tone)),
     [comparing, preview, geometry, view.tone]
@@ -297,12 +326,16 @@ export default function PhotoEditor({
                 <div className="space-y-4">
                   <div className="flex items-center">
                     <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-400">Levels</span>
-                    <button type="button" disabled={!geometry}
-                      onClick={() => geometry && setTone(autoLevels(geometry))}
+                    <button type="button" disabled={!geometry || autoBusy}
+                      onClick={runAuto}
+                      title="Corrects exposure and colour cast from the white floor, keeping the rug's own darkness"
                       className="rounded-sm border border-neutral-200 px-2.5 py-1 text-[12px] font-semibold hover:border-neutral-400">
-                      Auto
+                      {autoBusy ? 'Auto…' : 'Auto'}
                     </button>
                   </div>
+                  {autoNote && (
+                    <p className="-mt-2 text-[12px] text-neutral-500" aria-live="polite">{autoNote}</p>
+                  )}
                   <Slider label="Black point" min={0} max={254} value={settings.tone.black}
                     onChange={(black) => setTone({ black: Math.min(black, settings.tone.white - 1) })} />
                   <Slider label="Midtones" min={-100} max={100} value={Math.round(Math.log2(settings.tone.gamma) * 50)}
@@ -314,6 +347,8 @@ export default function PhotoEditor({
                   <Slider label="Contrast" min={-100} max={100} value={settings.tone.contrast} onChange={(contrast) => setTone({ contrast })} />
                   <Slider label="Saturation" min={-100} max={100} value={settings.tone.saturation} onChange={(saturation) => setTone({ saturation })} />
                   <Slider label="Warmth" min={-100} max={100} value={settings.tone.warmth} onChange={(warmth) => setTone({ warmth })} />
+                  <Slider label="Tint" min={-100} max={100} value={settings.tone.tint}
+                    format={(v) => (v > 0 ? `+${v} magenta` : v < 0 ? `${v} green` : '0')} onChange={(tint) => setTone({ tint })} />
                 </div>
               )}
             </div>
@@ -321,7 +356,7 @@ export default function PhotoEditor({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-neutral-100 px-5 py-3.5">
-          <button type="button" onClick={() => setSettings({ ...DEFAULT_SETTINGS, tone: NEUTRAL_TONE })}
+          <button type="button" onClick={() => { setSettings({ ...DEFAULT_SETTINGS, tone: NEUTRAL_TONE }); setAutoNote(''); }}
             disabled={!changed || busy} className="text-[13px] text-neutral-500 hover:text-neutral-900 disabled:opacity-40">
             Reset
           </button>

@@ -32,6 +32,14 @@ export function pixelsOf(img: ImageBitmap | HTMLImageElement, maxSide: number): 
   return { width: w, height: h, data: d.data };
 }
 
+/** Draws an image into a fresh pixel buffer of exactly w x h (it may be stretched to fit). */
+export function pixelsAt(img: ImageBitmap | HTMLImageElement, w: number, h: number): Px {
+  const [, ctx] = canvas(w, h);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+  return { width: w, height: h, data: ctx.getImageData(0, 0, w, h).data };
+}
+
 /**
  * Copies the transparency of `mask` (drawn at px's size, smoothly scaled) into
  * px, in place. Used to put a cutout's mask onto the full-resolution photo it
