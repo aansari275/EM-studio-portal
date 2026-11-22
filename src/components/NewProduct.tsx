@@ -8,6 +8,7 @@ import {
 import { getLibraryVariants } from '../lib/library';
 import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } from '../lib/options';
 import { PhotoPicker } from './PhotoPicker';
+import { useTabActive } from '../lib/tabContext';
 
 /**
  * Create a design that is not in the library yet.
@@ -63,11 +64,13 @@ export function NewProduct({
     queryFn: getStudioOptions,
   });
 
+  const tabActive = useTabActive();
   useEffect(() => {
+    if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, tabActive]);
 
   const set = (k: keyof typeof f) => (v: string) => setF((cur) => ({ ...cur, [k]: v }));
 

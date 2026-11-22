@@ -10,6 +10,7 @@ import {
 } from '../lib/studioEntries';
 import { saveZip, today } from '../lib/download';
 import { thumb } from '../lib/img';
+import { useTabActive } from '../lib/tabContext';
 
 /**
  * New entry, or an open one: customer, date, note and photos. In the open
@@ -50,12 +51,14 @@ export function EntryDialog({
   );
   const working = slots.some((s) => s.working);
 
+  const tabActive = useTabActive();
   useEffect(() => {
+    if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onClose();
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
-  }, [onClose, busy]);
+  }, [onClose, busy, tabActive]);
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);

@@ -5,6 +5,7 @@ import {
   startQuad, warp, type EditSettings, type Pt, type Px, type Quad, type Rect, type Tone,
 } from '../lib/photoEdit';
 import { decode, encode, paint, pixelsOf } from '../lib/canvasImage';
+import { useTabActive } from '../lib/tabContext';
 
 /**
  * The photo editor: fix skew, straighten, crop and tone, in a modal.
@@ -102,8 +103,11 @@ export default function PhotoEditor({
     }
   }, [bmp, busy, settings, file.name, onApply, onClose]);
 
-  // Escape and Enter belong to the editor while it is open, not to the form under it.
+  // Escape and Enter belong to the editor while it is open, not to the form
+  // under it, and only while its tab is the visible one.
+  const tabActive = useTabActive();
   useEffect(() => {
+    if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopImmediatePropagation();
@@ -118,7 +122,7 @@ export default function PhotoEditor({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [apply, busy, onClose]);
+  }, [apply, busy, onClose, tabActive]);
 
   const changed = !isDefaultSettings(settings);
 

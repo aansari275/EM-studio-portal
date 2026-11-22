@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, X } from 'lucide-react';
-import { AppHeader } from '../components/AppHeader';
 import { EntryDialog } from '../components/EntryDialog';
 import {
   listEntries, listCustomers, restoreEntry, sortEntries, formatDate, type EntryKind, type StudioEntry,
 } from '../lib/studioEntries';
 import { addStudioCustomer } from '../lib/options';
 import { thumb } from '../lib/img';
+import { useTabGuard } from '../lib/tabContext';
 
 /**
  * Custom Rugs and Sample Dispatch: one page, two kinds. Entries are grouped
@@ -35,6 +35,7 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
   const [open, setOpen] = useState<Open>(null);
   const [undo, setUndo] = useState<StudioEntry | null>(null);
   const [undoError, setUndoError] = useState('');
+  useTabGuard(open?.mode === 'new' ? 'The new entry you started has not been saved and will be lost.' : null);
 
   const key = ['studio-entries', kind];
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
@@ -81,9 +82,8 @@ export function StudioEntries({ kind }: { kind: EntryKind }) {
   }
 
   return (
-    <div className="min-h-screen bg-white text-neutral-900">
-      <AppHeader width={1100} />
-      <main className="mx-auto w-full max-w-[1100px] px-7 pb-16">
+    <div className="min-h-full bg-white text-neutral-900">
+      <main className="mx-auto w-full max-w-[1100px] px-4 pb-16 sm:px-7">
         <div className="mt-8 flex flex-wrap items-end gap-4">
           <div className="flex-1">
             <h1 className="font-serif text-[26px] font-normal">{copy.title}</h1>

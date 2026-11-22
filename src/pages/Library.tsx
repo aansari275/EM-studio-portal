@@ -15,7 +15,6 @@ import { useSelection } from '../lib/selection';
 const PptDialog = lazy(() => import('../components/PptDialog'));
 import { createCatalog, catalogUrl, EXPIRY_CHOICES } from '../lib/catalogs';
 import { currentUserEmail } from '../lib/auth';
-import { AppHeader } from '../components/AppHeader';
 import { thumb, heroImage, orderedImages } from '../lib/img';
 import { canonicalConstruction } from '../lib/library';
 import { NewProduct, type NewProductInitial } from '../components/NewProduct';
@@ -26,6 +25,7 @@ import type { SlideLayout } from '../lib/deckSlots';
 import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
+import { useTabActive } from '../lib/tabContext';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -174,8 +174,7 @@ export function Library() {
   }, [hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage, pageCount, shown.length]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-white text-neutral-900">
-      <AppHeader />
+    <div className="flex min-h-full flex-col bg-white text-neutral-900">
 
       <div className="mx-auto w-full max-w-[1400px] px-7">
         <label
@@ -583,12 +582,15 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
     enabled: !!product.baseStyleNumber,
   });
 
+  // Keys belong to the visible tab only: this dialog stays mounted while its tab is hidden.
+  const tabActive = useTabActive();
   useEffect(() => {
+    if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
-  }, [onClose]);
+  }, [onClose, tabActive]);
 
   const gallery = orderedImages(product);
 
@@ -913,7 +915,7 @@ function UndoToast({ product, onDone, onRestored }: {
   }
 
   return (
-    <div role="status" className="fixed bottom-24 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-4 rounded-md bg-neutral-900 px-5 py-3 text-[13px] text-white shadow-lg">
+    <div role="status" className="fixed bottom-24 left-1/2 z-[70] md:left-[calc(50%+110px)] flex -translate-x-1/2 items-center gap-4 rounded-md bg-neutral-900 px-5 py-3 text-[13px] text-white shadow-lg">
       <span>{error || `${product.styleNumber} deleted.`}</span>
       <button onClick={restore} disabled={busy} className="font-semibold text-[#9cc0e3] hover:underline disabled:opacity-60">
         {busy ? 'Restoring…' : 'Undo'}

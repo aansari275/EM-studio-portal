@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Download, ImagePlus } from 'lucide-react';
-import { AppHeader } from '../components/AppHeader';
 import { PhotoPicker, type Slot } from '../components/PhotoPicker';
 import { saveBlob, saveZip, today } from '../lib/download';
+import { useTabGuard } from '../lib/tabContext';
 
 /**
  * Background removal on its own page, for photos that are not going into the
@@ -15,6 +15,9 @@ export function BackgroundRemoval() {
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
   const busy = slots.some((s) => s.working);
+  useTabGuard(slots.length
+    ? `The ${slots.length === 1 ? 'photo' : `${slots.length} photos`} on this page will be lost unless you download ${slots.length === 1 ? 'it' : 'them'} first.`
+    : null);
 
   const add = (list: FileList | null) => {
     const picked = [...(list || [])].filter((f) => f.type.startsWith('image/'));
@@ -34,9 +37,8 @@ export function BackgroundRemoval() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-neutral-900">
-      <AppHeader width={1100} />
-      <main className="mx-auto w-full max-w-[1100px] px-7 pb-16">
+    <div className="min-h-full bg-white text-neutral-900">
+      <main className="mx-auto w-full max-w-[1100px] px-4 pb-16 sm:px-7">
         <h1 className="mt-8 font-serif text-[26px] font-normal">Background Removal</h1>
         <p className="mt-1.5 max-w-[620px] text-[13.5px] text-neutral-500">
           Drop photos here, remove their backgrounds, then click a photo to fix skew, straighten,

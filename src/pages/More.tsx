@@ -24,21 +24,8 @@ const ITEMS = [
 
 export function More() {
   return (
-    <div className="min-h-screen bg-white text-neutral-900">
-      <header className="mx-auto flex w-full max-w-[900px] flex-wrap items-center gap-4 px-7 pt-6">
-        <Link to="/" className="font-serif text-[17px]">
-          Eastern Mills
-          <span className="ml-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-neutral-400">
-            Studio
-          </span>
-        </Link>
-        <div className="flex-1" />
-        <Link to="/" className="text-[13px] text-neutral-500 hover:text-neutral-900">
-          Back to library
-        </Link>
-      </header>
-
-      <div className="mx-auto w-full max-w-[900px] px-7">
+    <div className="min-h-full bg-white pb-16 text-neutral-900">
+      <div className="mx-auto w-full max-w-[900px] px-4 sm:px-7">
         <h1 className="mt-8 font-serif text-[26px] font-normal">More</h1>
         <ul className="mt-7 divide-y divide-neutral-100 border-t border-neutral-100">
           {ITEMS.map((i) => (

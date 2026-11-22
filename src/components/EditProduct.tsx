@@ -7,6 +7,7 @@ import { updateProduct, uploadEditPhotos } from '../lib/productEdit';
 import { orderedImages, thumb } from '../lib/img';
 import { PhotoPicker } from './PhotoPicker';
 import { Label, Choice, Field } from './NewProduct';
+import { useTabActive } from '../lib/tabContext';
 
 /**
  * Edit an existing design: its number, specs and photos.
@@ -45,11 +46,13 @@ export function EditProduct({
     queryFn: getStudioOptions,
   });
 
+  const tabActive = useTabActive();
   useEffect(() => {
+    if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, busy]);
+  }, [onClose, busy, tabActive]);
 
   const set = (k: keyof typeof f) => (v: string) => setF((cur) => ({ ...cur, [k]: v }));
 
