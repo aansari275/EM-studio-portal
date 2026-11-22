@@ -1,6 +1,6 @@
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import {
-  db, search, colourways, resolveMany, normStyle, type Product,
+  db, search, colourways, resolveMany, onlyDeleted, normStyle, type Product,
   collection, query, orderBy, qlimit, getDocs,
 } from '../lib/em.mjs';
 
@@ -140,7 +140,11 @@ async function callTool(name: string, args: any, origin: string) {
 
   if (name === 'get_product') {
     const list = await colourways(String(args?.style ?? ''));
-    if (!list.length) return text(`No rug found for "${args?.style}".`);
+    if (!list.length) {
+      const gone = await colourways(String(args?.style ?? ''), { includeDeleted: true });
+      if (gone.length) return text(`${gone[0].style} was deleted from the library, so it is not offered.`);
+      return text(`No rug found for "${args?.style}".`);
+    }
     const body = list.map((p) =>
       `• ${fmt(p)}\n  ${p.images.slice(0, 3).join('\n  ')}`).join('\n');
     return text(`${list.length} colourway(s) of ${normStyle(String(args?.style))}:\n${body}`);
@@ -149,9 +153,14 @@ async function callTool(name: string, args: any, origin: string) {
   if (name === 'create_catalog') {
     const styles: string[] = Array.isArray(args?.styles) ? args.styles.map(String) : [];
     if (!styles.length) return text('Give at least one style number.');
-    const { found, missing } = await resolveMany(styles);
+    const { found, missing, deleted } = await resolveMany(styles);
     const withPhotos = found.filter((p) => p.images.length);
-    if (!withPhotos.length) return text('None of those styles have a photo on file.');
+    const deletedNote = deleted.length ? `\nDeleted from the library, left out: ${deleted.join(', ')}` : '';
+    if (!withPhotos.length) {
+      return text(found.length || !deleted.length
+        ? `None of those styles have a photo on file.${deletedNote}`
+        : `No catalog made.${deletedNote}`);
+    }
 
     const id = makeId();
     await setDoc(doc(db(), 'catalogs', id), {
@@ -176,12 +185,19 @@ async function callTool(name: string, args: any, origin: string) {
     const noPhoto = found.length - withPhotos.length;
     const photoNote = noPhoto ? `\n${noPhoto} skipped for having no photo.` : '';
     return text(`Catalog for ${args?.buyer}: ${origin}/c/${id}\n`
-      + `${withPhotos.length} rug(s).${photoNote}${note}`);
+      + `${withPhotos.length} rug(s).${photoNote}${note}${deletedNote}`);
   }
 
   if (name === 'build_ppt') {
-    const styles: string[] = Array.isArray(args?.styles) ? args.styles.map(String) : [];
-    if (!styles.length) return text('Give at least one style number.');
+    const asked: string[] = Array.isArray(args?.styles) ? args.styles.map(String) : [];
+    if (!asked.length) return text('Give at least one style number.');
+    // Styles whose only records are deleted are left out; anything else goes
+    // to the builder unchanged, as before.
+    const gone = await Promise.all(asked.map(onlyDeleted));
+    const styles = asked.filter((_, i) => !gone[i]);
+    const dropped = asked.filter((_, i) => gone[i]);
+    const droppedNote = dropped.length ? `\nDeleted from the library, left out: ${dropped.join(', ')}` : '';
+    if (!styles.length) return text(`No deck queued.${droppedNote}`);
     const jobId = makeId(10);
     await setDoc(doc(db(), 'ppt_jobs', jobId), {
       styles, title: String(args?.title || 'Eastern Mills'),
@@ -193,7 +209,7 @@ async function callTool(name: string, args: any, origin: string) {
     // hundred photographs — so the deck is built where build_deck.py lives,
     // which also keeps connector decks identical to hand-built ones.
     return text(`Queued a deck of ${styles.length} style(s). Job id: ${jobId}\n`
-      + `Call get_ppt with that id in about 30 seconds.`);
+      + `Call get_ppt with that id in about 30 seconds.${droppedNote}`);
   }
 
   if (name === 'get_ppt') {

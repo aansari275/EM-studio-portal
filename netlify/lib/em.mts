@@ -42,7 +42,17 @@ export interface Product {
   category: string;
   images: string[];
   source: 'archive' | 'showroom';
+  /** Soft deleted from the studio (`deletedAt` set, see src/lib/productEdit.ts). */
+  deleted: boolean;
 }
+
+/**
+ * Deleted designs are left out everywhere, as in the Library grid
+ * (src/lib/library.ts) and /api/search: dropped before the archive/showroom
+ * dedupe, so an archive copy of a deleted showroom record still shows.
+ */
+type Opts = { includeDeleted?: boolean };
+const live = (items: Product[], o: Opts = {}) => (o.includeDeleted ? items : items.filter((p) => !p.deleted));
 
 const fromEm = (d: any): Product => ({
   style: d.styleDisplay || `EM-${d.styleKey || ''}`,
@@ -53,6 +63,7 @@ const fromEm = (d: any): Product => ({
   category: d.category || '',
   images: (d.photos || []).map((p: any) => p?.url).filter(Boolean),
   source: 'archive',
+  deleted: !!d.deletedAt,
 });
 
 const fromShowroom = (d: any): Product => ({
@@ -64,6 +75,7 @@ const fromShowroom = (d: any): Product => ({
   category: d.category || '',
   images: [d.firebaseUrl, ...(d.additionalImages || [])].filter(Boolean),
   source: 'showroom',
+  deleted: !!d.deletedAt,
 });
 
 function dedupe(items: Product[]): Product[] {
@@ -83,7 +95,7 @@ const run = (q: any, map: (d: any) => Product): Promise<Product[]> =>
  * em_products is queried by indexed fields — a prefix on styleKey for
  * "EM-25-MA-9995", an equality on serial for "25-9995" or "9995".
  */
-export async function search(term: string, max = 50): Promise<Product[]> {
+export async function search(term: string, max = 50, o: Opts = {}): Promise<Product[]> {
   const t = normStyle(term);
   if (!t) return [];
   const s = serialOf(term);
@@ -95,7 +107,7 @@ export async function search(term: string, max = 50): Promise<Product[]> {
       qlimit(max)), fromShowroom),
   ];
   if (s) jobs.push(run(query(em, where('serial', '==', s), qlimit(max)), fromEm));
-  return dedupe((await Promise.all(jobs)).flat()).slice(0, max);
+  return dedupe(live((await Promise.all(jobs)).flat(), o)).slice(0, max);
 }
 
 /**
@@ -105,13 +117,14 @@ export async function search(term: string, max = 50): Promise<Product[]> {
  * ("23-6744"), which is not the stored key ("23-MA-6744"), so an exact match
  * has to fall back to resolving the real key first.
  */
-export async function colourways(style: string): Promise<Product[]> {
+export async function colourways(style: string, o: Opts = {}): Promise<Product[]> {
   let key = normStyle(style);
   if (!key) return [];
   const direct = await run(
     query(collection(db(), 'em_products'), where('styleKey', '==', key), qlimit(1)), fromEm);
   if (!direct.length) {
-    const resolved = await search(style, 1);
+    // a deleted record still tells us the real key, so a deleted style can be named as such
+    const resolved = await search(style, 1, { includeDeleted: true });
     if (resolved.length) key = normStyle(resolved[0].style);
   }
   const [em, show] = await Promise.all([
@@ -119,19 +132,31 @@ export async function colourways(style: string): Promise<Product[]> {
     run(query(collection(db(), 'showroom_products'),
       where('styleNumber', '==', `EM-${key}`), qlimit(20)), fromShowroom),
   ]);
-  return dedupe([...em, ...show]);
+  return dedupe(live([...em, ...show], o));
 }
 
-/** Resolve a list of style numbers, reporting the ones that matched nothing. */
+/** True when a style matches records and every one of them is deleted. */
+export async function onlyDeleted(raw: string): Promise<boolean> {
+  const all = await search(raw, 8, { includeDeleted: true });
+  return all.length > 0 && all.every((p) => p.deleted);
+}
+
+/**
+ * Resolve a list of style numbers, reporting the ones that matched nothing
+ * and, separately, the ones whose only records are deleted.
+ */
 export async function resolveMany(styles: string[]) {
   const found: Product[] = [];
   const missing: string[] = [];
+  const deleted: string[] = [];
   for (const raw of styles) {
-    const hits = await search(raw, 8);
+    const all = await search(raw, 8, { includeDeleted: true });
+    const hits = all.filter((p) => !p.deleted);
     if (hits.length) found.push(hits[0]);
+    else if (all.length) deleted.push(raw);
     else missing.push(raw);
   }
-  return { found, missing };
+  return { found, missing, deleted };
 }
 
 export { collection, query, orderBy, qlimit, getDocs };
