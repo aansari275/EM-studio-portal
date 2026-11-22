@@ -26,6 +26,8 @@ export interface BgPhoto {
   originalUrl?: string;
   originalPath?: string;
   cut: boolean;
+  /** The file is a cutout of the original, same framing (see Slot.cutOfOriginal). */
+  cutOfOriginal?: boolean;
   updatedAt: string;
 }
 

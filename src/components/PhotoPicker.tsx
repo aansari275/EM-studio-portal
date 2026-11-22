@@ -90,7 +90,9 @@ export function PhotoPicker({
         // only when someone actually asks for a background to be removed.
         const { removeBackground } = await import('../lib/bgremove');
         const { file, keptPct } = await removeBackground(slot.file);
-        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, working: false }));
+        // A cutout of the photo as it came in keeps its framing, so the editor
+        // can work from the full-resolution original later.
+        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, working: false, cutOfOriginal: !s.original }));
       } catch (e) {
         patch(slot.id, (s) => ({ ...s, working: false, failed: e instanceof Error ? e.message : 'failed' }));
       }
@@ -101,7 +103,7 @@ export function PhotoPicker({
   const undo = (id: string) => patch(id, restoreOriginal);
 
   const edited = (id: string, file: File) => {
-    patch(id, (s) => replaceFile(s, file));
+    patch(id, (s) => replaceFile(s, file, { cutOfOriginal: false }));
     setEditing(null);
   };
 
@@ -252,7 +254,10 @@ export function PhotoPicker({
 
       {editing !== null && slots[editing] && (
         <Suspense fallback={null}>
-          <PhotoEditor file={slots[editing].file} onApply={(f) => edited(slots[editing].id, f)} onClose={() => setEditing(null)} />
+          <PhotoEditor file={slots[editing].file}
+            full={slots[editing].cutOfOriginal ? slots[editing].original : undefined}
+            cameraFrame={!slots[editing].original || !!slots[editing].cutOfOriginal}
+            onApply={(f) => edited(slots[editing].id, f)} onClose={() => setEditing(null)} />
         </Suspense>
       )}
 

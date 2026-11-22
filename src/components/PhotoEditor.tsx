@@ -1,11 +1,15 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import {
-  DEFAULT_SETTINGS, MAX_ANGLE, NEUTRAL_TONE, applyTone, autoLevels, isDefaultSettings, plan, render,
-  startQuad, warp, type EditSettings, type Pt, type Px, type Quad, type Rect, type Tone,
+  DEFAULT_SETTINGS, MAX_ANGLE, NEUTRAL_TONE, applyTone, autoLevels, hasAlpha, isDefaultSettings, plan,
+  rescalePlan, sampleSteps, startQuad, warp,
+  type EditSettings, type Frame, type Pt, type Px, type Quad, type Rect, type Tone,
 } from '../lib/photoEdit';
-import { decode, encode, paint, pixelsOf } from '../lib/canvasImage';
+import { decode, encode, headOf, paint, pixelsOf, takeAlpha } from '../lib/canvasImage';
+import { jpegFocal35 } from '../lib/imageFormat';
 import { useTabActive } from '../lib/tabContext';
+import { SizePanel } from './PhotoEditorSize';
+import { ratioText, estimateNote } from '../lib/rugSize';
 
 /**
  * The photo editor: fix skew, straighten, crop and tone, in a modal.
@@ -16,27 +20,45 @@ import { useTabActive } from '../lib/tabContext';
  * so the tile's undo can restore it.
  */
 
-type Tool = 'skew' | 'straighten' | 'crop' | 'tone';
+type Tool = 'skew' | 'straighten' | 'crop' | 'size' | 'tone';
 const TOOLS: { id: Tool; label: string }[] = [
   { id: 'skew', label: 'Fix skew' },
   { id: 'straighten', label: 'Straighten' },
   { id: 'crop', label: 'Crop' },
+  { id: 'size', label: 'Size' },
   { id: 'tone', label: 'Tone' },
 ];
 const CORNER_NAMES = ['Top left', 'Top right', 'Bottom right', 'Bottom left'];
 const PREVIEW_SIDE = 1000;
 const MIN_CROP = 0.05;
+/** The result's long side. */
+const OUT_SIDE = 2000;
+/**
+ * The largest working copy Apply samples from, long side. A 42 MP original is
+ * ~170 MB of pixels; 6000px is ~95 MB and still gives the far end of a rug
+ * shot end-on enough detail for a 2000px result.
+ */
+const WORK_MAX = 6000;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 export default function PhotoEditor({
-  file, onApply, onClose,
+  file, full, cameraFrame = true, onApply, onClose,
 }: {
   file: File;
+  /**
+   * The full-resolution photo `file` was cut out of, same framing. Apply then
+   * samples this (with `file`'s transparency) rather than the smaller cutout.
+   */
+  full?: File;
+  /** The photo is still the camera's own frame (not cropped or warped before). */
+  cameraFrame?: boolean;
   onApply: (edited: File) => void;
   onClose: () => void;
 }) {
   const [bmp, setBmp] = useState<ImageBitmap | null>(null);
+  const [fullBmp, setFullBmp] = useState<ImageBitmap | null>(null);
+  const [frame, setFrame] = useState<Frame>({});
   const [preview, setPreview] = useState<Px | null>(null);
   const [error, setError] = useState('');
   const [tool, setTool] = useState<Tool>('skew');
@@ -60,6 +82,28 @@ export default function PhotoEditor({
     return () => { live = false; made?.close(); };
   }, [file]);
 
+  // The full-resolution original, when the photo is a cutout of it. Opening
+  // the editor never waits for it; Apply does.
+  useEffect(() => {
+    if (!full) return;
+    let live = true;
+    let made: ImageBitmap | null = null;
+    decode(full).then((b) => { made = b; if (live) setFullBmp(b); else b.close(); }).catch(() => {});
+    return () => { live = false; made?.close(); };
+  }, [full]);
+
+  // The lens, from EXIF, for working out a rug's true proportions. Only
+  // meaningful while the photo is the camera's own frame.
+  useEffect(() => {
+    if (!cameraFrame) return;
+    let live = true;
+    headOf(full || file).then((b) => {
+      const f35 = jpegFocal35(b);
+      if (live && f35) setFrame({ focal: f35 / 43.27 });
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [file, full, cameraFrame]);
+
   useEffect(() => { dialog.current?.focus(); }, []);
 
   const start = useMemo(() => (preview ? startQuad(preview) : null), [preview]);
@@ -72,11 +116,30 @@ export default function PhotoEditor({
     if (!preview) return null;
     if (tool === 'skew') return preview;
     try {
-      return warp(preview, plan(preview.width, preview.height, view, PREVIEW_SIDE, tool === 'tone' ? 'all' : 'straighten'));
+      const upTo = tool === 'tone' || tool === 'size' ? 'all' : 'straighten';
+      return warp(preview, plan(preview.width, preview.height, view, PREVIEW_SIDE, upTo, frame));
     } catch {
       return preview; // corners in a line: show the photo until they are moved apart
     }
-  }, [preview, tool, view]);
+  }, [preview, tool, view, frame]);
+
+  // How the shape is being decided (the estimate, the stretch in use), for
+  // the Fix skew and Size panels. Cheap: no pixels involved.
+  const info = useMemo(() => {
+    if (!preview) return null;
+    try { return plan(preview.width, preview.height, { ...settings, crop: null }, PREVIEW_SIDE, 'all', frame).info; }
+    catch { return null; }
+  }, [preview, settings, frame]);
+
+  // The result's size in pixels, from the photo Apply will actually sample.
+  const source = fullBmp || bmp;
+  const outSize = useMemo(() => {
+    if (!source) return null;
+    try {
+      const p = plan(source.width, source.height, settings, OUT_SIDE, 'all', frame);
+      return { w: p.outW, h: p.outH };
+    } catch { return null; }
+  }, [source, settings, frame]);
   const shown = useMemo(
     () => (comparing ? preview : geometry && applyTone(geometry, view.tone)),
     [comparing, preview, geometry, view.tone]
@@ -90,10 +153,24 @@ export default function PhotoEditor({
     // let the busy state paint before the main thread is taken for a second or two
     await new Promise((r) => setTimeout(r, 30));
     try {
-      // Crop zooms in, so start from enough source pixels to fill 2000px.
-      const zoom = settings.crop ? 1 / Math.max(settings.crop.w, settings.crop.h) : 1;
-      const full = pixelsOf(bmp, Math.min(4000, 2000 * zoom));
-      const out = render(full, settings, 2000);
+      // Sample the best photo there is: the full-resolution original when
+      // this is a cutout of it (its mask goes on top), else the photo itself.
+      let src = bmp;
+      if (full) src = fullBmp || await decode(full);
+      const natW = src.width, natH = src.height;
+      // The result is sized from the full-resolution frame, long side up to 2000.
+      const p = plan(natW, natH, settings, OUT_SIDE, 'all', frame);
+      // Work from a copy just big enough that the most stretched part (the far
+      // end of a rug under perspective) is sampled about 1:1, and no bigger
+      // than WORK_MAX; the squeezed parts are supersampled instead.
+      const steps = sampleSteps(p);
+      const k = Math.min(1, WORK_MAX / Math.max(natW, natH), 1 / Math.max(steps.min, 1e-6));
+      const work = pixelsOf(src, Math.max(natW, natH) * k);
+      if (full && preview && hasAlpha(preview)) takeAlpha(work, bmp);
+      const pw = rescalePlan(p, natW, natH, work.width, work.height);
+      const ss = Math.max(1, Math.min(3, Math.ceil(steps.max * (work.width / natW) - 0.25)));
+      const out = applyTone(warp(work, pw, ss), settings.tone);
+      if (src !== bmp && src !== fullBmp) src.close();
       const { blob, type, ext } = await encode(out);
       const base = file.name.replace(/\.[^.]+$/, '').replace(/-edit$/, '');
       onApply(new File([blob], `${base}-edit.${ext}`, { type }));
@@ -101,7 +178,7 @@ export default function PhotoEditor({
       setError(e instanceof Error ? e.message : 'Could not apply the changes.');
       setBusy(false);
     }
-  }, [bmp, busy, settings, file.name, onApply, onClose]);
+  }, [bmp, fullBmp, full, preview, busy, settings, frame, file.name, onApply, onClose]);
 
   // Escape and Enter belong to the editor while it is open, not to the form
   // under it, and only while its tab is the visible one.
@@ -165,6 +242,13 @@ export default function PhotoEditor({
               {tool === 'skew' && (
                 <div className="space-y-3 text-[12.5px] text-neutral-500">
                   <p>Drag the four corners onto the corners of the rug. Apply squares it up.</p>
+                  {settings.quad && info?.estimate && (
+                    <p className="rounded-sm bg-neutral-50 px-3 py-2 text-neutral-600" aria-live="polite">
+                      Proportions from the corners: <b className="font-semibold tabular-nums">{ratioText(info.estimate.ratio)}</b>{' '}
+                      (width : length). {estimateNote(info.estimate, cameraFrame)}
+                      {' '}Change them in Size.
+                    </p>
+                  )}
                   {start && !settings.quad && (
                     <button type="button" onClick={() => set({ quad: start })}
                       className="font-semibold text-[#2F4C69] hover:underline">
@@ -195,6 +279,11 @@ export default function PhotoEditor({
                     </button>
                   )}
                 </div>
+              )}
+
+              {tool === 'size' && info && (
+                <SizePanel settings={settings} info={info} hasSkew={!!settings.quad} cameraFrame={cameraFrame}
+                  outSize={outSize} onChange={(patch) => set(patch)} />
               )}
 
               {tool === 'tone' && (

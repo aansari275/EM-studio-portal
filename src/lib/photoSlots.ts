@@ -13,6 +13,13 @@ export type Slot = {
   original?: File;
   /** The background has been removed (the file is a cutout). */
   cut?: boolean;
+  /**
+   * The file is a cutout of `original` as it came in, same framing, nothing
+   * else changed. The editor then warps from the full-resolution original
+   * (with the cutout's transparency) instead of the 2000px cutout, and
+   * trusts the frame for working out a rug's proportions.
+   */
+  cutOfOriginal?: boolean;
   keptPct?: number;
   /** Background removal is running on it. */
   working?: boolean;
@@ -94,11 +101,11 @@ export function restoreOriginal(s: Slot): Slot {
     ? { remote: s.remoteOriginal, remoteFor: s.original } : {};
   return {
     ...s, ...reuse, file: s.original, original: undefined, remoteOriginal: undefined, remoteOriginalFor: undefined,
-    cut: false, keptPct: undefined, failed: undefined, syncError: undefined,
+    cut: false, cutOfOriginal: undefined, keptPct: undefined, failed: undefined, syncError: undefined,
   };
 }
 
-export type SavedPhoto = RemoteFile & { originalUrl?: string; originalPath?: string; cut?: boolean };
+export type SavedPhoto = RemoteFile & { originalUrl?: string; originalPath?: string; cut?: boolean; cutOfOriginal?: boolean };
 
 /** What goes in the document: every tile that has an upload, in tile order. */
 export function savedPhotos(slots: Slot[]): SavedPhoto[] {
@@ -106,6 +113,7 @@ export function savedPhotos(slots: Slot[]): SavedPhoto[] {
     ...s.remote!,
     ...(s.remoteOriginal ? { originalUrl: s.remoteOriginal.url, originalPath: s.remoteOriginal.path } : {}),
     ...(s.cut ? { cut: true } : {}),
+    ...(s.cutOfOriginal && s.remoteOriginal ? { cutOfOriginal: true } : {}),
   }));
 }
 
@@ -127,6 +135,7 @@ export function placeholderSlots(photos: SavedPhoto[]): Slot[] {
     file: new File([], p.name),
     converting: true,
     cut: !!p.cut,
+    ...(p.cutOfOriginal && p.originalUrl ? { cutOfOriginal: true } : {}),
     remote: { url: p.url, path: p.path, name: p.name, width: p.width, height: p.height, uploadedAt: p.uploadedAt },
     ...(p.originalUrl ? { remoteOriginal: { url: p.originalUrl, path: p.originalPath || '', name: p.name, uploadedAt: p.uploadedAt } } : {}),
   }));

@@ -52,7 +52,7 @@ export function BackgroundRemoval() {
   const photos = useMemo<BgPhoto[]>(() => savedPhotos(slots).map((p) => ({
     name: p.name, url: p.url, path: p.path,
     ...(p.originalUrl ? { originalUrl: p.originalUrl, originalPath: p.originalPath } : {}),
-    cut: !!p.cut, updatedAt: p.uploadedAt,
+    cut: !!p.cut, ...(p.cutOfOriginal ? { cutOfOriginal: true } : {}), updatedAt: p.uploadedAt,
   })), [slots]);
 
   const { status, dirty } = useAutosave<BgPhoto[]>(

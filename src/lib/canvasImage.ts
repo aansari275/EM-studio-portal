@@ -32,6 +32,25 @@ export function pixelsOf(img: ImageBitmap | HTMLImageElement, maxSide: number): 
   return { width: w, height: h, data: d.data };
 }
 
+/**
+ * Copies the transparency of `mask` (drawn at px's size, smoothly scaled) into
+ * px, in place. Used to put a cutout's mask onto the full-resolution photo it
+ * was cut from.
+ */
+export function takeAlpha(px: Px, mask: ImageBitmap | HTMLImageElement): void {
+  const [, ctx] = canvas(px.width, px.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(mask, 0, 0, px.width, px.height);
+  const m = ctx.getImageData(0, 0, px.width, px.height).data;
+  const d = px.data;
+  for (let i = 3; i < d.length; i += 4) d[i] = m[i];
+}
+
+/** The first `n` bytes of a file, for reading its EXIF. */
+export async function headOf(file: Blob, n = 256 * 1024): Promise<Uint8Array> {
+  return new Uint8Array(await file.slice(0, n).arrayBuffer());
+}
+
 export function decode(blob: Blob): Promise<ImageBitmap> {
   // premultiplyAlpha 'none' keeps the colour under semi-transparent cutout edges
   return createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'default' })
