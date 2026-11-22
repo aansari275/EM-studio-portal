@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   homography, apply, plan, warp, render, applyTone, autoLevels, buildLuts, startQuad,
-  hasAlpha, encodingFor, newPx, straightenShrink, insetQuad,
-  DEFAULT_SETTINGS, NEUTRAL_TONE, type Quad, type Px,
+  hasAlpha, encodingFor, newPx, straightenShrink, insetQuad, estimateAspect, rescalePlan, sampleSteps,
+  isDefaultSettings, TYPICAL_FOCAL, DEFAULT_SETTINGS, NEUTRAL_TONE, type Quad, type Px,
 } from './photoEdit';
 
 const close = (a: number, b: number, eps = 1e-6) => expect(Math.abs(a - b)).toBeLessThan(eps);
@@ -53,11 +53,21 @@ describe('plan', () => {
     });
   });
 
-  it('takes the output size from the average of opposite sides', () => {
+  it('takes the output shape from the perspective estimate and its area from the quad', () => {
     const quad: Quad = [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.6, y: 1 }, { x: 0, y: 1 }];
     const p = plan(1000, 1000, { quad, angle: 0, crop: null });
-    expect(p.outW).toBe(550); // (500 + 600) / 2
-    close(p.outH, (1000 + Math.hypot(100, 1000)) / 2, 1);
+    const est = estimateAspect(quad.map((q) => ({ x: q.x * 1000, y: q.y * 1000 })) as Quad, 1000, 1000);
+    close(p.outW / p.outH, est.ratio, 0.01);
+    const area = 550 * (1000 + Math.hypot(100, 1000)) / 2;
+    close(p.outW * p.outH, area, area * 0.01);
+    expect(p.info.estimate).toEqual(est);
+  });
+
+  it('a flat-on rectangle keeps its side lengths exactly', () => {
+    const quad: Quad = [{ x: 0.1, y: 0.2 }, { x: 0.7, y: 0.2 }, { x: 0.7, y: 0.6 }, { x: 0.1, y: 0.6 }];
+    const p = plan(1000, 1000, { quad, angle: 0, crop: null });
+    expect([p.outW, p.outH]).toEqual([600, 400]);
+    expect(p.info.estimate?.method).toBe('sides');
   });
 
   it('caps the long side', () => {
@@ -189,5 +199,179 @@ describe('startQuad', () => {
       expect(Math.abs(p.x * 100 - corners[i].x)).toBeLessThan(3);
       expect(Math.abs(p.y * 100 - corners[i].y)).toBeLessThan(3);
     });
+  });
+});
+
+// ─── True proportions under perspective ─────────────────────────────────────
+
+type V = [number, number, number];
+const sub = (a: V, b: V): V => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const norm = (a: V): V => { const l = Math.hypot(...a); return [a[0] / l, a[1] / l, a[2] / l]; };
+const crossV = (a: V, b: V): V => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dotV = (a: V, b: V) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+/**
+ * Photographs a W x L rug lying on the floor (z = 0, its length along y, far
+ * end at +y) with a pinhole camera at `eye` looking at `target`, focal length
+ * `fd` in frame diagonals, `roll` in degrees. Returns the corners as seen,
+ * top left, top right, bottom right, bottom left, in a w x h frame.
+ */
+function photograph(Wr: number, Lr: number, eye: V, target: V, fd: number, roll = 0, w = 6000, h = 4000): Quad {
+  const fwd = norm(sub(target, eye));
+  const right = norm(crossV(fwd, [0, 0, 1]));
+  const down = crossV(fwd, right);
+  const f = fd * Math.hypot(w, h);
+  const r = (roll * Math.PI) / 180;
+  const corners: V[] = [[-Wr / 2, Lr / 2, 0], [Wr / 2, Lr / 2, 0], [Wr / 2, -Lr / 2, 0], [-Wr / 2, -Lr / 2, 0]];
+  return corners.map((P) => {
+    const d = sub(P, eye);
+    const x = dotV(d, right), y = dotV(d, down), z = dotV(d, fwd);
+    const u = (f * x) / z, v = (f * y) / z;
+    return { x: w / 2 + u * Math.cos(r) - v * Math.sin(r), y: h / 2 + u * Math.sin(r) + v * Math.cos(r) };
+  }) as Quad;
+}
+
+const ratioOk = (got: number, want: number, pct: number) =>
+  expect(Math.abs(got / want - 1) * 100).toBeLessThan(pct);
+
+describe('estimateAspect', () => {
+  const RUGS: [string, number, number][] = [['1:1', 1, 1], ['2:3', 2, 3], ['5:8', 5, 8], ['1:3', 1, 3]];
+
+  it('recovers the true ratio from an oblique view, focal length unknown', () => {
+    for (const [, Wr, Lr] of RUGS) {
+      // standing off one corner, looking down at the rug: both pairs of sides converge
+      const q = photograph(Wr, Lr, [Wr * 1.1 + 1, -Lr * 1.2 - 1, 2.2], [0, 0, 0], 0.65, 3);
+      const e = estimateAspect(q, 6000, 4000);
+      expect(e.method).toBe('perspective');
+      ratioOk(e.ratio, Wr / Lr, 2);
+      ratioOk(e.focal!, 0.65, 3);
+    }
+  });
+
+  it('recovers the true ratio from a steep end-on view, with the focal length from EXIF', () => {
+    // like DSC04675: shot from the short end, the long sides converge hard and
+    // the near and far edges are parallel in the photo
+    for (const [, Wr, Lr] of RUGS) {
+      for (const fd of [0.65, 1.0]) {
+        const q = photograph(Wr, Lr, [0, -Lr / 2 - 1.2, 1.7], [0, 0.1, 0], fd);
+        // the classic side-length average gets this badly wrong
+        const sides = (Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) + Math.hypot(q[2].x - q[3].x, q[2].y - q[3].y))
+          / (Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) + Math.hypot(q[2].x - q[1].x, q[2].y - q[1].y));
+        expect(Math.abs(sides / (Wr / Lr) - 1)).toBeGreaterThan(0.2);
+        const e = estimateAspect(q, 6000, 4000, fd);
+        expect(e.method).toBe('lens');
+        ratioOk(e.ratio, Wr / Lr, 1);
+      }
+    }
+  });
+
+  it('end-on with a slight turn and roll still comes out right', () => {
+    for (const [, Wr, Lr] of RUGS) {
+      const q = photograph(Wr, Lr, [0.3, -Lr / 2 - 1.5, 1.6], [0, 0, 0], 0.65, -2);
+      ratioOk(estimateAspect(q, 6000, 4000, 0.65).ratio, Wr / Lr, 1);
+      // with no EXIF it falls back to a typical lens, which is exact here
+      ratioOk(estimateAspect(q, 6000, 4000).ratio, Wr / Lr, 3);
+    }
+  });
+
+  it('without EXIF a wrong guess of the lens is off, but still closer than the side lengths', () => {
+    // a 43mm-equivalent lens, assumed to be 28mm: this is why EXIF matters
+    const q = photograph(5, 8, [0, -5.2, 1.7], [0, 0.1, 0], 1.0);
+    const e = estimateAspect(q, 6000, 4000);
+    expect(e.method).toBe('assumed');
+    expect(TYPICAL_FOCAL).toBeCloseTo(0.647, 2);
+    const sides = (Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) + Math.hypot(q[2].x - q[3].x, q[2].y - q[3].y))
+      / (Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) + Math.hypot(q[2].x - q[1].x, q[2].y - q[1].y));
+    const err = (r: number) => Math.abs(Math.log(r / (5 / 8)));
+    expect(err(e.ratio)).toBeLessThan(err(sides));
+  });
+
+  it('is the side-length ratio when the view is flat on', () => {
+    const q: Quad = [{ x: 1000, y: 1000 }, { x: 3000, y: 1000 }, { x: 3000, y: 3200 }, { x: 1000, y: 3200 }];
+    const e = estimateAspect(q, 6000, 4000, 0.65);
+    expect(e.method).toBe('sides');
+    close(e.ratio, 2000 / 2200, 1e-9);
+  });
+
+  it('falls back to the side lengths for a crossed quad, and never returns an absurd ratio', () => {
+    const crossed: Quad = [{ x: 0, y: 0 }, { x: 100, y: 100 }, { x: 100, y: 0 }, { x: 0, y: 100 }];
+    expect(estimateAspect(crossed, 200, 200).method).toBe('sides');
+    const sliver: Quad = [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 30 }, { x: 0, y: 30 }];
+    const e = estimateAspect(sliver, 1000, 1000);
+    expect(e.ratio).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('size (stretch and shape)', () => {
+  it('stretches width and length separately', () => {
+    const p = plan(1000, 500, { quad: null, angle: 0, crop: null, stretch: { x: 1.5, y: 0.8 } }, 5000);
+    expect([p.outW, p.outH]).toEqual([1500, 400]);
+    const s = apply(p.toSource, { x: 1500, y: 400 });
+    close(s.x, 1000); close(s.y, 500);
+  });
+
+  it('a rug size sets the proportions exactly and keeps the area', () => {
+    const p = plan(1000, 1000, { quad: null, angle: 0, crop: null, shape: 5 / 8 }, 5000);
+    close(p.outW / p.outH, 5 / 8, 0.003);
+    close(p.outW * p.outH, 1e6, 2000);
+  });
+
+  it('a rug size on top of a skew fix wins over the estimate, wherever the corners are', () => {
+    const quad: Quad = [{ x: 0.3, y: 0.1 }, { x: 0.7, y: 0.12 }, { x: 0.95, y: 0.9 }, { x: 0.05, y: 0.88 }];
+    for (const q of [quad, insetQuad(0.1)]) {
+      const p = plan(3000, 2000, { quad: q, angle: 0, crop: null, shape: 0.625 });
+      close(p.outW / p.outH, 0.625, 0.002);
+      // corners of the output still land on the corners of the rug
+      const c = apply(p.toSource, { x: p.outW, y: p.outH });
+      close(c.x, q[2].x * 3000, 1e-6); close(c.y, q[2].y * 2000, 1e-6);
+    }
+  });
+
+  it('composes with crop in one matrix: crop is in fractions of the sized frame', () => {
+    const p = plan(1000, 1000, { quad: null, angle: 0, crop: { x: 0.5, y: 0, w: 0.5, h: 1 }, stretch: { x: 2, y: 1 } }, 5000);
+    expect([p.outW, p.outH]).toEqual([1000, 1000]);
+    close(apply(p.toSource, { x: 0, y: 0 }).x, 500);
+  });
+
+  it('counts as an edit, and neutral stretch does not', () => {
+    expect(isDefaultSettings({ ...DEFAULT_SETTINGS, stretch: { x: 1, y: 1 } })).toBe(true);
+    expect(isDefaultSettings({ ...DEFAULT_SETTINGS, stretch: { x: 1.2, y: 1 } })).toBe(false);
+    expect(isDefaultSettings({ ...DEFAULT_SETTINGS, shape: 0.625 })).toBe(false);
+  });
+});
+
+describe('resolution', () => {
+  it('sizes from the full-resolution frame and samples a working copy of it', () => {
+    const quad: Quad = [{ x: 0.2, y: 0.1 }, { x: 0.8, y: 0.1 }, { x: 0.95, y: 0.95 }, { x: 0.05, y: 0.95 }];
+    const full = plan(8000, 5300, { quad, angle: 0, crop: null }, 2000);
+    expect(Math.max(full.outW, full.outH)).toBe(2000);
+    const work = rescalePlan(full, 8000, 5300, 4000, 2650);
+    const a = apply(full.toSource, { x: 10, y: 10 }), b = apply(work.toSource, { x: 10, y: 10 });
+    close(b.x, a.x / 2, 1e-6); close(b.y, a.y / 2, 1e-6);
+    const st = sampleSteps(full);
+    expect(st.min).toBeGreaterThan(0);
+    expect(st.max).toBeGreaterThan(st.min); // the near end is squeezed more than the far end
+  });
+
+  it('supersampling keeps a flat colour flat and alpha exact', () => {
+    const src = img(50, 50, () => [100, 150, 200, 255]);
+    const out = warp(src, plan(50, 50, { quad: null, angle: 5, crop: null }), 3);
+    for (let i = 0; i < out.data.length; i += 4) {
+      expect(out.data[i]).toBe(100); expect(out.data[i + 3]).toBe(255);
+    }
+  });
+});
+
+describe('rug sizes', () => {
+  it('names the nearest common size and keeps the photo long side long', async () => {
+    const { nearestSize, orientSize, ratioText } = await import('./rugSize');
+    expect(nearestSize(5 / 8)).toBe('5 x 8 ft');
+    expect(nearestSize(8 / 5)).toBe('5 x 8 ft');
+    expect(nearestSize(0.674)).toBe('2 x 3, 4 x 6 or 6 x 9 ft');
+    expect(nearestSize(0.8)).toBe('8 x 10 ft');
+    expect(nearestSize(0.56)).toBeNull();
+    expect(orientSize({ a: 5, b: 8 }, false)).toEqual([5, 8]);
+    expect(orientSize({ a: 5, b: 8 }, true)).toEqual([8, 5]);
+    expect(ratioText(0.625)).toBe('1 : 1.60');
   });
 });

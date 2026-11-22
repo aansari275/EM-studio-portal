@@ -132,6 +132,53 @@ export function jpegOrientation(b: Uint8Array): number {
   return 1;
 }
 
+/** The APP1 EXIF block of a JPEG: offset of its TIFF header, or -1. */
+function jpegExifAt(b: Uint8Array): number {
+  if (!startsWith(b, [0xff, 0xd8])) return -1;
+  let o = 2;
+  while (o + 4 <= b.length) {
+    if (b[o] !== 0xff) return -1;
+    const m = b[o + 1];
+    if (m === 0xda || m === 0xd9) return -1;
+    const len = (b[o + 2] << 8) | b[o + 3];
+    if (m === 0xe1 && ascii(b, o + 4, 6) === 'Exif\0\0') return o + 10;
+    o += 2 + len;
+  }
+  return -1;
+}
+
+/**
+ * The 35mm-equivalent focal length (EXIF FocalLengthIn35mmFilm, in mm) of a
+ * JPEG, or null when it has none. Cameras and phones write it; the photo
+ * editor uses it to work out a rug's true proportions under perspective.
+ */
+export function jpegFocal35(b: Uint8Array): number | null {
+  const at = jpegExifAt(b);
+  if (at < 0 || at + 8 > b.length) return null;
+  const le = b[at] === 0x49 && b[at + 1] === 0x49;
+  if (!le && !(b[at] === 0x4d && b[at + 1] === 0x4d)) return null;
+  const u16 = (o: number) => (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1]);
+  const u32 = (o: number) => (le
+    ? (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0
+    : ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0);
+  const find = (ifd: number, tag: number): number => {
+    if (ifd + 2 > b.length) return -1;
+    const n = u16(ifd);
+    for (let i = 0; i < n; i++) {
+      const e = ifd + 2 + i * 12;
+      if (e + 12 > b.length) return -1;
+      if (u16(e) === tag) return e;
+    }
+    return -1;
+  };
+  const ptr = find(at + u32(at + 4), 0x8769);
+  if (ptr < 0) return null;
+  const e = find(at + u32(ptr + 8), 0xa405);
+  if (e < 0) return null;
+  const v = u16(e + 8);
+  return v > 0 && v < 2000 ? v : null;
+}
+
 /* ----------------------------------------------------- RAW previews -- */
 
 export type EmbeddedJpeg = { start: number; end: number; width: number; height: number };

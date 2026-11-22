@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findEmbeddedJpegs, jpegOrientation, sniffFormat, tiffOrientation } from './imageFormat';
+import { findEmbeddedJpegs, jpegFocal35, jpegOrientation, sniffFormat, tiffOrientation } from './imageFormat';
 
 const bytes = (...parts: (number[] | string)[]) =>
   new Uint8Array(parts.flatMap((p) => (typeof p === 'string' ? [...p].map((c) => c.charCodeAt(0)) : p)));
@@ -95,5 +95,25 @@ describe('findEmbeddedJpegs', () => {
 
   it('ignores a truncated JPEG', () => {
     expect(findEmbeddedJpegs(new Uint8Array(jpeg(100, 100).slice(0, -2)))).toEqual([]);
+  });
+});
+
+describe('jpegFocal35', () => {
+  // II*\0, IFD0 at 8 with one entry (ExifIFD pointer -> 26), Exif IFD with FocalLengthIn35mmFilm = 28
+  const tiff = [
+    0x49, 0x49, 0x2a, 0, 8, 0, 0, 0,
+    1, 0, 0x69, 0x87, 4, 0, 1, 0, 0, 0, 26, 0, 0, 0, 0, 0, 0, 0,
+    1, 0, 0x05, 0xa4, 3, 0, 1, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0,
+  ];
+  const exif = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff];
+  const app1 = [0xff, 0xe1, 0, exif.length + 2, ...exif];
+
+  it('reads the 35mm-equivalent focal length', () => {
+    expect(jpegFocal35(new Uint8Array([0xff, 0xd8, ...app1, 0xff, 0xda, 0, 2]))).toBe(28);
+  });
+
+  it('is null without EXIF, or for a PNG', () => {
+    expect(jpegFocal35(new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2]))).toBeNull();
+    expect(jpegFocal35(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBeNull();
   });
 });
