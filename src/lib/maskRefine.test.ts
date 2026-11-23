@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { refineMask, touchesEdge, cropBox, maskStats, cutoutWarning } from './maskRefine';
+import { refineMask, touchesEdge, cropBox, maskStats, cutoutWarning, finishCutout, unsureShare, rerunKeepsRug, FILLED_WARNING, UNSURE_WARNING } from './maskRefine';
 
 const W = 120, H = 60;
 /** A photo: dark floor on the left, a brown rug from x = 60 to the right, both with a little noise. */
@@ -113,5 +113,73 @@ describe('decontaminate (edge colour)', () => {
       const j = (30 * W + x) * 4;
       if (x < 58 || x >= 62) expect([...px.slice(j, j + 4)]).toEqual([...before.slice(j, j + 4)]);
     }
+  });
+});
+
+describe('a rug is one solid object', () => {
+  /** The test photo with a pale band inside the rug (x 80..95, y 20..40), the colour of the floor. */
+  function striped(): Uint8ClampedArray {
+    const d = photo();
+    for (let y = 20; y < 40; y++) for (let x = 80; x < 96; x++) d.set([226, 229, 233, 255], (y * W + x) * 4);
+    return d;
+  }
+  /** What the model gives: the rug from x = 60 to 115 (rows 5..55), with the pale band read as floor. */
+  function modelMask(): Uint8Array {
+    const m = new Uint8Array(W * H);
+    for (let y = 5; y < 55; y++) for (let x = 60; x < 115; x++) m[y * W + x] = 255;
+    for (let y = 20; y < 40; y++) for (let x = 80; x < 96; x++) m[y * W + x] = 30;
+    return m;
+  }
+
+  it('fills the see-through band and keeps the photo\'s own colours there', () => {
+    const px = striped();
+    const { rgba, filledPct } = finishCutout(px.slice(), modelMask(), W, H);
+    for (let y = 20; y < 40; y++) for (let x = 80; x < 96; x++) {
+      const j = (y * W + x) * 4;
+      expect(rgba[j + 3]).toBe(255);
+      // not recoloured by the edge colour step: still the pale band, not brown
+      expect([rgba[j], rgba[j + 1], rgba[j + 2]]).toEqual([226, 229, 233]);
+    }
+    expect(filledPct).toBeGreaterThan(5);
+  });
+
+  it('says so on the tile when a meaningful part was filled', () => {
+    const { rgba, ...info } = finishCutout(striped(), modelMask(), W, H);
+    const a = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) a[i] = rgba[i * 4 + 3];
+    expect(cutoutWarning(maskStats(a, W, H, info))).toBe(FILLED_WARNING);
+    // a clean rug says nothing
+    const c = finishCutout(photo(), maskOf((x) => (x >= 60 ? 1 : 0)), W, H);
+    expect(c.filledPct).toBe(0);
+    const ca = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) ca[i] = c.rgba[i * 4 + 3];
+    expect(cutoutWarning({ ...maskStats(ca, W, H, c), touchesEdge: false })).toBeNull();
+  });
+
+  it('flags a mask the model was unsure about over a large part of the rug', () => {
+    const m = modelMask().map((v) => (v ? 255 : 0));
+    expect(unsureShare(m)).toBe(0);
+    const unsure = m.map((v, i) => (v && (i % W) < 90 ? 120 : v));
+    expect(unsureShare(unsure)).toBeGreaterThan(15);
+    const solid = new Uint8Array(W * H);
+    for (let y = 10; y < 50; y++) for (let x = 20; x < 100; x++) solid[y * W + x] = 255;
+    expect(cutoutWarning({ ...maskStats(solid, W, H), unsurePct: 55 })).toBe(UNSURE_WARNING);
+    expect(cutoutWarning({ ...maskStats(solid, W, H), unsurePct: 7 })).toBeNull();
+    expect(cutoutWarning({ ...maskStats(solid, W, H), filledPct: 0.4 })).toBeNull();
+    expect(cutoutWarning({ ...maskStats(solid, W, H), filledPct: 4.8 })).toBe(FILLED_WARNING);
+  });
+});
+
+describe('crop re-run guard', () => {
+  it('keeps the re-run only when it does not drop a large part of the rug', () => {
+    const first = new Uint8Array(W * H), same = new Uint8Array(W * H), half = new Uint8Array(W * H);
+    for (let y = 10; y < 50; y++) for (let x = 20; x < 100; x++) {
+      first[y * W + x] = 200; // unsure but kept
+      same[y * W + x] = 255;
+      if (y >= 30) half[y * W + x] = 255;
+    }
+    expect(rerunKeepsRug(first, same)).toBe(true);
+    expect(rerunKeepsRug(first, half)).toBe(false);
+    expect(rerunKeepsRug(new Uint8Array(W * H), half)).toBe(true);
   });
 });

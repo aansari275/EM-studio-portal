@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web';
 import type { CutStage } from './jobStatus';
-import { cropBox, cutoutWarning, finishCutout, maskStats, touchesEdge, type Box, type MaskStats } from './maskRefine';
+import { cropBox, cutoutWarning, finishCutout, maskStats, rerunKeepsRug, touchesEdge, type Box, type CleanupInfo, type MaskStats } from './maskRefine';
 
 /**
  * Background removal, in the browser.
@@ -104,12 +104,12 @@ function placeMask(mask: HTMLCanvasElement, w: number, h: number, b: Box): Uint8
 }
 
 /**
- * The clean-up (guided filter, alpha, edge colour) in a worker, or here if a
+ * The clean-up (inside filled, guided filter, alpha, edge colour) in a worker, or here if a
  * worker cannot start. Takes the photo's pixels and gives back the cutout's.
  */
-function refine(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, h: number): Promise<Uint8ClampedArray> {
+function refine(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, h: number, first?: Uint8Array): Promise<{ rgba: Uint8ClampedArray } & CleanupInfo> {
   return new Promise((resolve) => {
-    const here = () => resolve(finishCutout(rgba, mask, w, h));
+    const here = () => resolve(finishCutout(rgba, mask, w, h, first));
     let worker: Worker;
     try {
       worker = new Worker(new URL('./maskRefine.worker.ts', import.meta.url), { type: 'module' });
@@ -117,10 +117,10 @@ function refine(rgba: Uint8ClampedArray, mask: Uint8Array, w: number, h: number)
       here();
       return;
     }
-    worker.onmessage = (e: MessageEvent<Uint8ClampedArray>) => { worker.terminate(); resolve(e.data); };
+    worker.onmessage = (e: MessageEvent<{ rgba: Uint8ClampedArray } & CleanupInfo>) => { worker.terminate(); resolve(e.data); };
     worker.onerror = () => { worker.terminate(); here(); };
     // a copy goes to the worker, so the fallback still has the original pixels
-    worker.postMessage({ rgba, mask, w, h });
+    worker.postMessage({ rgba, mask, w, h, first });
   });
 }
 
@@ -131,7 +131,7 @@ export interface Cutout {
   /** Why the cutout needs a human look, or null. */
   warning: string | null;
   stats: MaskStats;
-  /** Whether the model was run a second time on the rug's own crop. */
+  /** Whether the mask from the model's second run, on the rug's own crop, was used. */
   cropRerun: boolean;
 }
 
@@ -142,8 +142,11 @@ export interface Cutout {
  * 2. Unless that mask touches the edge of the frame (a full-bleed or cut-off
  *    shot, where it made things worse in testing), the model again on a crop
  *    around the rug, taken from the full-resolution photo, so the rug fills
- *    the model's input and the edge is sharper.
- * 3. A guided filter against the photo at the output size snaps the mask to
+ *    the model's input and the edge is sharper. If that run keeps much less
+ *    of the rug than the first (`rerunKeepsRug`), the first is used.
+ * 3. The inside of the rug is filled (a rug is one solid object: a pale stripe
+ *    the model read as floor becomes opaque again, `maskFill.ts`), then
+ *    a guided filter against the photo at the output size snaps the mask to
  *    the rug's real edge, and the part see-through edge pixels take the rug's
  *    colour instead of the floor's, so no pale halo is left (`maskRefine.ts`).
  * The mask stats then decide the tile's "Check this" note.
@@ -169,15 +172,17 @@ export async function removeBackground(
   const h = Math.max(1, Math.round(bmp.height * scale));
   const whole: Box = { x: 0, y: 0, w, h };
 
-  let mask = placeMask(await runModel(session, bmp, 0, 0, bmp.width, bmp.height), w, h, whole);
+  const first = placeMask(await runModel(session, bmp, 0, 0, bmp.width, bmp.height), w, h, whole);
+  let mask = first;
   const t1 = performance.now();
   let cropRerun = false;
-  const box = touchesEdge(mask, w, h) ? null : cropBox(mask, w, h);
+  const box = touchesEdge(first, w, h) ? null : cropBox(first, w, h);
   if (box && (box.w < w || box.h < h)) {
     await stage('edge');
     const k = bmp.width / w;
-    mask = placeMask(await runModel(session, bmp, box.x * k, box.y * k, box.w * k, box.h * k), w, h, box);
-    cropRerun = true;
+    const again = placeMask(await runModel(session, bmp, box.x * k, box.y * k, box.w * k, box.h * k), w, h, box);
+    // the re-run only sharpens the edge; it must not drop part of the rug
+    if (rerunKeepsRug(first, again)) { mask = again; cropRerun = true; }
   }
   const t2 = performance.now();
   await stage('cleanup');
@@ -189,7 +194,7 @@ export async function removeBackground(
   fctx.drawImage(bmp, 0, 0, w, h);
   bmp.close?.();
   const colour = fctx.getImageData(0, 0, w, h);
-  const done = await refine(colour.data, mask, w, h);
+  const { rgba: done, ...info } = await refine(colour.data, mask, w, h, mask === first ? undefined : first);
   const t3 = performance.now();
   fctx.putImageData(new ImageData(new Uint8ClampedArray(done), w, h), 0, 0);
   const alpha = new Uint8Array(w * h);
@@ -199,7 +204,7 @@ export async function removeBackground(
   const blob: Blob = await new Promise((res, rej) =>
     full.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the cut-out.'))), 'image/png')
   );
-  const stats = maskStats(alpha, w, h);
+  const stats = maskStats(alpha, w, h, info);
   // Timings for checking speed on a real build (Performance panel); no UI.
   try {
     performance.measure('bgremove:model', { start: t0, end: t1 });

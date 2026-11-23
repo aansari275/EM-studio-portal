@@ -1,3 +1,5 @@
+import { fillInterior } from './maskFill';
+
 /**
  * Cleaning up a background removal mask, pure maths on typed arrays.
  *
@@ -90,15 +92,44 @@ export function cropBox(alpha: Uint8Array | Uint8ClampedArray, w: number, h: num
   return { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 };
 }
 
+/**
+ * The crop re-run must not lose a large part of the rug that the first pass
+ * kept. EM-26-MA-10458 (lilac, mustard and black stripes on white): the first
+ * pass was unsure (grey) over the top half, the re-run on the crop called that
+ * half floor, and the cutout kept 28% of the frame instead of about 70%. When
+ * the re-run keeps less than this share of what the first pass kept (over
+ * half), the first pass is used.
+ */
+export const RERUN_MIN_KEEP = 0.85;
+
+export function rerunKeepsRug(first: Uint8Array | Uint8ClampedArray, second: Uint8Array | Uint8ClampedArray, thr = 128): boolean {
+  let a = 0, b = 0;
+  for (let i = 0; i < first.length; i++) { if (first[i] > thr) a++; if (second[i] > thr) b++; }
+  return a === 0 || b >= RERUN_MIN_KEEP * a;
+}
+
 export interface MaskStats {
   /** Share of the frame kept (over 50%), percent. */
   keptPct: number;
   /** Share of the kept area (over 10%) that is only partly opaque (10 to 90%), percent. */
   semiPct: number;
   touchesEdge: boolean;
+  /**
+   * Share of the rug, percent, that the model left see-through or weak inside
+   * the outline and that was filled in (`maskFill.ts`). Set by the clean-up.
+   */
+  filledPct?: number;
+  /**
+   * Share of the model's mask, percent, where it was unsure (between a quarter
+   * and three quarters). Measured on the 11 test photos: 1.6 to 7.3 on good
+   * cutouts, 55 on EM-26-MA-10458, where the top half of the rug was lost.
+   */
+  unsurePct?: number;
 }
 
-export function maskStats(alpha: Uint8Array | Uint8ClampedArray, w: number, h: number): MaskStats {
+export type CleanupInfo = { filledPct: number; unsurePct: number };
+
+export function maskStats(alpha: Uint8Array | Uint8ClampedArray, w: number, h: number, info?: CleanupInfo): MaskStats {
   let kept = 0, any = 0, semi = 0;
   for (let i = 0; i < w * h; i++) {
     const a = alpha[i];
@@ -109,11 +140,26 @@ export function maskStats(alpha: Uint8Array | Uint8ClampedArray, w: number, h: n
     keptPct: Math.round((100 * kept) / (w * h)),
     semiPct: any ? Math.round((1000 * semi) / any) / 10 : 0,
     touchesEdge: touchesEdge(alpha, w, h),
+    ...(info ?? {}),
   };
 }
 
 /** Over this share of semi-transparent pixels in the kept area, the rug is probably see-through somewhere. */
 export const SEMI_WARN_PCT = 12;
+/** Over this share of the rug filled in, she should look (a stripe, a patch, a bay). */
+export const FILLED_WARN_PCT = 0.5;
+
+export const FILLED_WARNING = 'Part of the rug was see through and has been filled in. Check it.';
+/** Over this share of the model's mask unsure, parts of the rug are probably missing or guessed. */
+export const UNSURE_WARN_PCT = 15;
+export const UNSURE_WARNING = 'The tool was unsure about parts of the rug. Check the cutout.';
+
+/** Share of the mask (over a quarter) that is between a quarter and three quarters, percent. */
+export function unsureShare(mask: Uint8Array | Uint8ClampedArray): number {
+  let any = 0, mid = 0;
+  for (let i = 0; i < mask.length; i++) { const m = mask[i]; if (m > 64) { any++; if (m < 192) mid++; } }
+  return any ? Math.round((1000 * mid) / any) / 10 : 0;
+}
 
 /**
  * What the tile says when a cutout needs a human look, or null. The first
@@ -122,7 +168,9 @@ export const SEMI_WARN_PCT = 12;
 export function cutoutWarning(s: MaskStats): string | null {
   if (s.keptPct < 8) return 'Very little was kept. Check the cutout.';
   if (s.keptPct > 97) return 'Almost nothing was removed. Check the cutout.';
+  if ((s.unsurePct ?? 0) >= UNSURE_WARN_PCT) return UNSURE_WARNING;
   if (s.touchesEdge) return 'Rug touches the edge of the photo. Check the cutout.';
+  if ((s.filledPct ?? 0) >= FILLED_WARN_PCT) return FILLED_WARNING;
   if (s.semiPct > SEMI_WARN_PCT) return 'Parts of the rug look see-through. Check the cutout.';
   return null;
 }
@@ -273,13 +321,28 @@ export function decontaminate(rgba: Uint8Array | Uint8ClampedArray, w: number, h
 }
 
 /**
- * The whole clean-up for a cutout: the guided filter on the mask, the mask
- * into the alpha channel, then the edge colour. In place on `rgba` (the photo
- * at the cutout's size), which is also returned.
+ * The whole clean-up for a cutout: the inside of the rug filled (holes, weak
+ * patches, soft bays; `maskFill.ts`), the guided filter on the mask, the
+ * enclosed holes filled once more (the filter can open a small one near the
+ * outline), the mask into the alpha channel, then the edge colour. Filled
+ * pixels are fully opaque, so the edge colour step never touches them: they
+ * keep the photo's own colours. In place on `rgba` (the photo at the cutout's
+ * size), which is also returned, with the share of the rug filled in and
+ * how unsure the model was.
  */
-export function finishCutout<T extends Uint8Array | Uint8ClampedArray>(rgba: T, mask: Uint8Array, w: number, h: number): T {
-  const alpha = refineMask(rgba, mask, w, h);
+export function finishCutout<T extends Uint8Array | Uint8ClampedArray>(
+  rgba: T, mask: Uint8Array, w: number, h: number, firstPass?: Uint8Array
+): { rgba: T } & CleanupInfo {
+  // how unsure the model was, on either pass: a re-run can sound sure and be wrong
+  const unsurePct = Math.max(unsureShare(mask), firstPass ? unsureShare(firstPass) : 0);
+  const first = fillInterior(mask, w, h, { bays: true });
+  const second = fillInterior(refineMask(rgba, first.mask, w, h), w, h);
+  const alpha = second.mask;
   for (let i = 0; i < w * h; i++) rgba[i * 4 + 3] = alpha[i];
   decontaminate(rgba, w, h);
-  return rgba;
+  // the second pass only mends what the filter opened; its weak count is the
+  // filter's own soft rim on a wobbly outline, not the model's doing
+  const changed = first.holes + first.weak + second.holes;
+  const filledPct = first.inside ? Math.round((1000 * changed) / first.inside) / 10 : 0;
+  return { rgba, filledPct, unsurePct };
 }
