@@ -231,12 +231,15 @@ export async function rotatePhoto(p: ShowroomProduct, url: string, quarterTurns:
  */
 export async function keepCutoutPhoto(
   p: ShowroomProduct, url: string, cutout: File,
-  onStatus?: (s: UploadStatus) => void
+  onStatus?: (s: UploadStatus) => void,
+  /** The file is up; the record is being written. */
+  onWriting?: () => void
 ): Promise<ShowroomProduct> {
   const fresh = await freshDesign(p);
   if (!orderedImages(fresh).includes(url)) throw new Error('That photo is no longer on this design.');
   const [cutUrl] = await uploadEditPhotos(fresh, [cutout], undefined, onStatus ? (_, st) => onStatus(st) : undefined);
   if (!cutUrl) throw new Error('The upload gave no address.');
+  onWriting?.();
   const next = keepCutout(orderedImages(fresh), fresh.photoOriginals || [], url, cutUrl,
     { at: new Date().toISOString(), by: currentUserEmail() || 'studio' });
   return reorderPhotos(fresh, next.photos, next.originals);

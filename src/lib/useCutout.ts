@@ -66,7 +66,9 @@ export function useCutout(
     const t0 = performance.now();
     try {
       say('Getting the photo');
-      const res = await fetch(fixStorageUrl(url));
+      const res = await fetch(fixStorageUrl(url)).catch(() => {
+        throw new Error('Could not load the photo. Check the connection.');
+      });
       if (!res.ok) throw new Error(`Could not load the photo (${res.status}).`);
       const blob = await res.blob();
       const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'photo').split('/').pop() || 'photo.jpg';
@@ -107,7 +109,7 @@ export function useCutout(
     try {
       const saved = await keepCutoutPhoto(product, url, r.file, (st) => {
         if (mounted.current) setJob(stepJob(st) || { label: 'Saving to the design' });
-      });
+      }, () => { if (mounted.current) setJob({ label: 'Saving to the design' }); });
       try { performance.measure('libcut:keep', { start: t0, end: performance.now() }); } catch { /* older browsers */ }
       onSaved(saved, at);
       // The record now shows the kept PNG; the effect on the new url clears the rest.

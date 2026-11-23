@@ -670,7 +670,8 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
             }>
               {shot ? (
                 <>
-                  <img src={cut.result ? cut.result.preview : thumb(shot, 900)} alt={product.displayName}
+                  {/* keyed, so a swapped photo never shows the old picture while the new one loads */}
+                  <img key={cut.result ? cut.result.preview : shot} src={cut.result ? cut.result.preview : thumb(shot, 900)} alt={product.displayName}
                     style={cut.result ? undefined : turn.style} className="h-full w-full object-contain" />
                   <div className="absolute right-3 top-3 flex flex-col gap-2">
                     <RotateButton onClick={turn.rotate} busy={turn.busy} disabled={cut.busy || !!cut.result}

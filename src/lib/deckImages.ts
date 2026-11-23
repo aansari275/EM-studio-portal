@@ -55,6 +55,18 @@ export const EMAIL_LIMIT = 25 * 1024 * 1024;
 const cdnUrl = (url: string, { w, h, q }: Px) =>
   `/.netlify/images?url=${encodeURIComponent(url)}&w=${w}&h=${h}&fit=contain&fm=jpg&q=${q}`;
 
+/**
+ * A cutout is a PNG with transparency, and the CDN's JPEG turns the see-through
+ * background BLACK (measured 23 Nov 2026 on a Library cutout: corner pixel
+ * 0,0,0). So a PNG is fetched from the CDN as PNG, sized, and flattened on
+ * white here (resizeLocally), like the dev path.
+ */
+const isPng = (url: string) => {
+  try { return /\.png$/i.test(decodeURIComponent(new URL(url, 'https://x').pathname)); } catch { return false; }
+};
+const cdnPngUrl = (url: string, { w, h }: Px) =>
+  `/.netlify/images?url=${encodeURIComponent(url)}&w=${w}&h=${h}&fit=contain&fm=png`;
+
 /** Resize in the browser. Used in dev, where the CDN endpoint does not exist, and if the CDN fails. */
 async function resizeLocally(blob: Blob, { w, h, q }: Px): Promise<Blob> {
   const bmp = await createImageBitmap(blob);
@@ -85,7 +97,9 @@ async function loadOne(raw: string, quality: Px): Promise<DeckImage> {
     blob = await resizeLocally(await fetchBlob(url), quality);
   } else {
     try {
-      blob = await fetchBlob(cdnUrl(url, quality));
+      blob = isPng(url)
+        ? await resizeLocally(await fetchBlob(cdnPngUrl(url, quality)), quality)
+        : await fetchBlob(cdnUrl(url, quality));
     } catch {
       blob = await resizeLocally(await fetchBlob(url), quality);
     }
