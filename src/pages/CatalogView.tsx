@@ -77,7 +77,8 @@ export function CatalogView() {
                 loading={i < 4 ? 'eager' : 'lazy'}
                 fetchPriority={i < 4 ? 'high' : 'auto'}
                 decoding="async"
-                className="h-full w-full object-cover"
+                // a cutout (transparent PNG) sits on white, not on the grey placeholder
+                className="h-full w-full bg-white object-cover"
               />
             </div>
             <figcaption className="pt-3">

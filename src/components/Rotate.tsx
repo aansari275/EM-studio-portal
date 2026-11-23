@@ -44,17 +44,19 @@ export function useRotate(product: ShowroomProduct, url: string, onSaved: (p: Sh
   const style = turns
     ? { transform: `rotate(${turns * 90}deg)`, transition: 'transform 200ms ease' }
     : undefined;
-  return { rotate, busy, error, style };
+  /** Turned on screen and not saved yet, or saving. */
+  const pendingTurn = busy || turns !== 0;
+  return { rotate, busy, error, style, pendingTurn };
 }
 
-export function RotateButton({ onClick, busy, className = '', label = 'Turn photo 90° clockwise' }: {
-  onClick: () => void; busy: boolean; className?: string; label?: string;
+export function RotateButton({ onClick, busy, disabled = false, className = '', label = 'Turn photo 90° clockwise' }: {
+  onClick: () => void; busy: boolean; disabled?: boolean; className?: string; label?: string;
 }) {
   return (
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onClick(); }}
-      disabled={busy}
+      disabled={busy || disabled}
       title={busy ? 'Saving the turned photo…' : label}
       aria-label={label}
       className={className}

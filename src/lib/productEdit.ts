@@ -6,6 +6,8 @@ import { onIdTokenChanged } from 'firebase/auth';
 import { orderedImages } from './img';
 import { prepareUpload, uploadWithProgress, type UploadStatus } from './uploadPrep';
 import { parseSlideLayout, toFrac, isDefaultSlots, type Box, type SlideLayout } from './deckSlots';
+import { carryOriginal, keepCutout, restoreOriginal, type PhotoOriginal } from './photoOriginals';
+import { freshDesign } from './library';
 
 /**
  * Editing and deleting a design from the library.
@@ -147,8 +149,13 @@ export async function restoreProduct(p: ShowroomProduct): Promise<void> {
  * photo becomes the main one. Only the order changes: no photo is added or
  * removed, and the specs are left alone.
  */
-export async function reorderPhotos(p: ShowroomProduct, photos: string[]): Promise<ShowroomProduct> {
+export async function reorderPhotos(
+  p: ShowroomProduct, photos: string[],
+  /** Also replace the record's kept originals (Remove background / Restore original). */
+  originals?: PhotoOriginal[]
+): Promise<ShowroomProduct> {
   const [hero, ...rest] = photos;
+  const extra = originals ? { photoOriginals: originals } : {};
   if (isArchive(p)) {
     const r = archiveRef(p);
     const old = (await getDoc(r)).data() as any;
@@ -157,10 +164,11 @@ export async function reorderPhotos(p: ShowroomProduct, photos: string[]): Promi
     await updateDoc(r, {
       photos: photos.map((url) => byUrl.get(url) || { url }),
       heroPinned: true,
+      ...extra,
       updatedAt: serverTimestamp(),
       updatedBy: currentUserEmail() || 'studio',
     });
-    return { ...p, firebaseUrl: hero || '', additionalImages: rest, heroPinned: true };
+    return { ...p, firebaseUrl: hero || '', additionalImages: rest, heroPinned: true, ...extra };
   }
   const r = showroomRef(p);
   await updateDoc(r, {
@@ -168,6 +176,7 @@ export async function reorderPhotos(p: ShowroomProduct, photos: string[]): Promi
     additionalImages: rest,
     // The studio chose this order, so heroImage() must not second-guess it.
     heroPinned: true,
+    ...extra,
     updatedAt: serverTimestamp(),
     updatedBy: currentUserEmail() || 'studio',
   });
@@ -207,7 +216,37 @@ export async function rotatePhoto(p: ShowroomProduct, url: string, quarterTurns:
 
   const next = [...photos];
   next[at] = fresh;
-  return reorderPhotos(p, next);
+  // A kept cutout that is turned can still be restored.
+  return reorderPhotos(p, next, carryOriginal(p.photoOriginals || [], url, fresh) || undefined);
+}
+
+/**
+ * Keep a cutout made in the Library preview in place of photo `url`.
+ * The PNG goes up through `uploadEditPhotos` (the 3 MB PNG rule), then one
+ * write puts it in the same position and notes the photo it replaced in
+ * `photoOriginals`. Only the photo list and that field are written, like a
+ * turn: `updateProduct` would also rewrite the specs and re-derive
+ * `baseStyleNumber`, which can regroup a colourway. The record is read fresh
+ * first, so a change made since the dialog opened is not undone.
+ */
+export async function keepCutoutPhoto(
+  p: ShowroomProduct, url: string, cutout: File,
+  onStatus?: (s: UploadStatus) => void
+): Promise<ShowroomProduct> {
+  const fresh = await freshDesign(p);
+  if (!orderedImages(fresh).includes(url)) throw new Error('That photo is no longer on this design.');
+  const [cutUrl] = await uploadEditPhotos(fresh, [cutout], undefined, onStatus ? (_, st) => onStatus(st) : undefined);
+  if (!cutUrl) throw new Error('The upload gave no address.');
+  const next = keepCutout(orderedImages(fresh), fresh.photoOriginals || [], url, cutUrl,
+    { at: new Date().toISOString(), by: currentUserEmail() || 'studio' });
+  return reorderPhotos(fresh, next.photos, next.originals);
+}
+
+/** Put back the photo a kept cutout replaced, in the same position. The cutout file stays in Storage. */
+export async function restoreOriginalPhoto(p: ShowroomProduct, url: string): Promise<ShowroomProduct> {
+  const fresh = await freshDesign(p);
+  const next = restoreOriginal(orderedImages(fresh), fresh.photoOriginals || [], url);
+  return reorderPhotos(fresh, next.photos, next.originals);
 }
 
 /**

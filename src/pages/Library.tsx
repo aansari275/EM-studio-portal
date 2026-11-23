@@ -25,6 +25,8 @@ import type { SlideLayout } from '../lib/deckSlots';
 import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
+import { CutoutButton, CutoutWorking, CutoutBar } from '../components/PhotoCutout';
+import { useCutout, ROUND_BUTTON } from '../lib/useCutout';
 import { useTabActive } from '../lib/tabContext';
 import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
 import type { Slot } from '../lib/photoSlots';
@@ -73,6 +75,8 @@ export function Library() {
   function afterRotate(p: ShowroomProduct) {
     if (tray.has(p.id)) tray.replace(p);
     qc.invalidateQueries({ queryKey: ['library'] });
+    // colourway tiles in an open preview show each record's hero
+    qc.invalidateQueries({ queryKey: ['variants'] });
   }
 
   // A slide layout saved from the preview. Merged into the copies on screen
@@ -320,7 +324,9 @@ export function Library() {
         <Detail
           product={open}
           onClose={() => setOpen(null)}
-          onChanged={(p) => { setOpen(p); afterRotate(p); }}
+          // Only the preview still open on that record is updated: a save that
+          // finishes after the dialog closed must not open it again.
+          onChanged={(p) => { setOpen((cur) => (cur && cur.id === p.id ? p : cur)); afterRotate(p); }}
           onLayoutSaved={afterLayout}
           onEdit={(p) => setEditing(p)}
           onDeleted={afterDelete}
@@ -592,6 +598,12 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
     shotAt.current = orderedImages(product).indexOf(shot);
     onChanged?.(p);
   });
+  // Remove background / Restore original on the photo being viewed. The new
+  // file has a new address, so the view follows it by its position.
+  const cut = useCutout(product, shot, (p, at) => {
+    shotAt.current = at;
+    onChanged?.(p);
+  });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -651,12 +663,21 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
 
         <div className="grid gap-7 p-6 sm:grid-cols-[1.2fr_1fr]">
           <div>
-            <div className="relative aspect-[4/5] overflow-hidden rounded-sm bg-white shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]">
+            <div className={
+              'relative aspect-[4/5] overflow-hidden rounded-sm shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ' +
+              // a cutout on show sits on a checkerboard, so what was removed is plain to see
+              (cut.result ? 'bg-[conic-gradient(#ececec_0_25%,#fff_0_50%,#ececec_0_75%,#fff_0)] bg-[length:18px_18px]' : 'bg-white')
+            }>
               {shot ? (
                 <>
-                  <img src={thumb(shot, 900)} alt={product.displayName} style={turn.style} className="h-full w-full object-contain" />
-                  <RotateButton onClick={turn.rotate} busy={turn.busy} label="Turn this photo 90° clockwise"
-                    className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-neutral-700 shadow-[0_1px_3px_rgba(0,0,0,0.2)] hover:text-[#2F4C69] [&_svg]:h-4 [&_svg]:w-4" />
+                  <img src={cut.result ? cut.result.preview : thumb(shot, 900)} alt={product.displayName}
+                    style={cut.result ? undefined : turn.style} className="h-full w-full object-contain" />
+                  <div className="absolute right-3 top-3 flex flex-col gap-2">
+                    <RotateButton onClick={turn.rotate} busy={turn.busy} disabled={cut.busy || !!cut.result}
+                      label="Turn this photo 90° clockwise" className={ROUND_BUTTON + ' [&_svg]:h-4 [&_svg]:w-4'} />
+                    <CutoutButton cut={cut} disabled={turn.pendingTurn} />
+                  </div>
+                  <CutoutWorking cut={cut} />
                   {turn.error && (
                     <p role="alert" className="absolute inset-x-0 bottom-0 bg-red-700/90 px-3 py-1.5 text-[12px] text-white">{turn.error}</p>
                   )}
@@ -665,6 +686,7 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
                 <div className="flex h-full items-center justify-center text-sm text-neutral-400">No photo yet</div>
               )}
             </div>
+            <CutoutBar cut={cut} />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <PhotoOrder product={product} photos={gallery} shot={shot} onShot={setShot}
                 onSaved={(p) => onChanged?.(p)} />
@@ -723,7 +745,7 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
                             }
                           >
                             <div className="aspect-square bg-neutral-100">
-                              {hero && <img src={thumb(hero, 160)} alt="" loading="lazy" className="h-full w-full object-contain" />}
+                              {hero && <img src={thumb(hero, 160)} alt="" loading="lazy" className="h-full w-full bg-white object-contain" />}
                             </div>
                             <div className="truncate px-1 py-1 text-[10.5px] text-neutral-700">{name}</div>
                           </button>
