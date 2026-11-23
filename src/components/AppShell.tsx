@@ -234,7 +234,7 @@ function TabPanel({ k, active, setGuards, panelRef, onScroll }: {
 function Brand() {
   return (
     <Link to="/" className="font-serif text-[17px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2F4C69]">
-      Eastern Mills
+      Eastern
       <span className="ml-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-neutral-400">Studio</span>
     </Link>
   );

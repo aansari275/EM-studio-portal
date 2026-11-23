@@ -73,8 +73,7 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
       <div className="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-8 text-center">
-        <h1 className="text-lg font-semibold tracking-wide text-neutral-900">EASTERN MILLS</h1>
-        <p className="mt-1 mb-8 text-sm text-neutral-500">Studio Portal</p>
+        <h1 className="mb-8 text-lg font-semibold tracking-wide text-neutral-900">EASTERN STUDIO</h1>
         {children}
       </div>
     </div>

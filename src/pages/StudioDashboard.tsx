@@ -75,8 +75,8 @@ export function StudioDashboard({ initialTab = 'dispatches' }: { initialTab?: Ta
                 <Camera className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Studio Portal</h1>
-                <p className="text-sm text-gray-500">Eastern Mills Photography</p>
+                <h1 className="text-xl font-bold text-gray-900">Eastern Studio</h1>
+                <p className="text-sm text-gray-500">Photography</p>
               </div>
             </div>
             <button
