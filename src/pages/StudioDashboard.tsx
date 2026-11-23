@@ -8,6 +8,9 @@ import { cn, formatDate } from '../lib/utils';
 import { KapettoKitsList } from '../components/KapettoKitsList';
 import { KapettoKitUpload } from '../components/KapettoKitUpload';
 
+/** Kapetto is not shown in this app (owner, 23 Nov 2026). The tab code stays, switched off. */
+const SHOW_KAPETTO = false;
+
 type Tab = 'dispatches' | 'sample-bazar' | 'rug-gallery' | 'kapetto-kits';
 
 export function StudioDashboard({ initialTab = 'dispatches' }: { initialTab?: Tab } = {}) {
@@ -36,6 +39,8 @@ export function StudioDashboard({ initialTab = 'dispatches' }: { initialTab?: Ta
     queryKey: ['kapetto-kits'],
     queryFn: getKapettoKits,
     refetchInterval: 30000,
+    // Kapetto is not shown in this app (owner, 23 Nov 2026), so its kits are not loaded.
+    enabled: SHOW_KAPETTO,
   });
 
   const [selectedKit, setSelectedKit] = useState<KapettoKit | null>(null);
@@ -147,7 +152,7 @@ export function StudioDashboard({ initialTab = 'dispatches' }: { initialTab?: Ta
                 </span>
               )}
             </button>
-            <button
+            {SHOW_KAPETTO && <button
               onClick={() => setActiveTab('kapetto-kits')}
               className={cn(
                 'flex-1 flex items-center justify-center gap-1.5 py-3 rounded-lg font-medium transition-colors text-sm',
@@ -167,7 +172,7 @@ export function StudioDashboard({ initialTab = 'dispatches' }: { initialTab?: Ta
                   {kapettoKitsCount}
                 </span>
               )}
-            </button>
+            </button>}
           </div>
         </div>
       </header>

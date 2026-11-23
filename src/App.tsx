@@ -25,10 +25,11 @@ function App() {
   return (
     <Suspense fallback={<p className="py-16 text-center text-sm text-neutral-400">Loading…</p>}>
     <Routes>
-      {/* the older workflows, reached from More */}
+      {/* the older workflows, by direct URL or from /more */}
       <Route path="/dispatches" element={<StudioDashboard initialTab="dispatches" />} />
       <Route path="/sample-bazar" element={<StudioDashboard initialTab="sample-bazar" />} />
-      <Route path="/kapetto" element={<StudioDashboard initialTab="kapetto-kits" />} />
+      {/* Kapetto is not shown in this app (owner, 23 Nov 2026). The Kapetto Kits code stays, unreachable. */}
+      <Route path="/kapetto" element={<Navigate to="/" replace />} />
 
       <Route path="/upload/:type/:id" element={<UploadPhotos />} />
       <Route path="/rug-gallery" element={<RugGallery />} />

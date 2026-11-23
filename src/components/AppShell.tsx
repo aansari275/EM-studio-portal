@@ -21,7 +21,11 @@ const BackgroundRemoval = lazy(() => import('../pages/BackgroundRemoval').then((
 const MyLinks = lazy(() => import('../pages/MyLinks').then((m) => ({ default: m.MyLinks })));
 const More = lazy(() => import('../pages/More').then((m) => ({ default: m.More })));
 
-type TabDef = { key: TabKey; path: string; label: string; Icon: typeof LayoutGrid; render: () => ReactNode };
+type TabDef = {
+  key: TabKey; path: string; label: string; Icon: typeof LayoutGrid; render: () => ReactNode;
+  /** Not in the sidebar: opens only from its URL (owner, 23 Nov 2026: More is off the sidebar). */
+  hidden?: boolean;
+};
 
 const TABS: TabDef[] = [
   { key: 'library', path: '/', label: 'Library', Icon: LayoutGrid, render: () => <Library /> },
@@ -32,7 +36,7 @@ const TABS: TabDef[] = [
   { key: 'background-removal', path: '/background-removal', label: 'Background Removal', Icon: Eraser,
     render: () => <BackgroundRemoval /> },
   { key: 'links', path: '/links', label: 'My links', Icon: Link2, render: () => <MyLinks /> },
-  { key: 'more', path: '/more', label: 'More', Icon: Ellipsis, render: () => <More /> },
+  { key: 'more', path: '/more', label: 'More', Icon: Ellipsis, render: () => <More />, hidden: true },
 ];
 
 const BY_KEY = Object.fromEntries(TABS.map((t) => [t.key, t])) as Record<TabKey, TabDef>;
@@ -253,7 +257,7 @@ function SideNav({ onPick, firstRef }: { onPick: () => void; firstRef?: React.Re
       <div className="px-5 pb-6 pt-6"><Brand /></div>
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-3">
         <ul className="space-y-0.5">
-          {TABS.map((t, i) => (
+          {TABS.filter((t) => !t.hidden).map((t, i) => (
             <li key={t.key}>
               <NavLink to={t.path} end={t.path === '/'} onClick={onPick} className={itemCls}
                 ref={i === 0 ? firstRef : undefined}>

@@ -180,6 +180,8 @@ export async function restoreEntry(kind: EntryKind, id: string): Promise<void> {
  * studio added itself, sorted, one entry per name. A buyer's code wins over
  * a typed-in copy of the same name.
  */
+const HIDDEN_CUSTOMER = /kapetto/i;
+
 export async function listCustomers(): Promise<Customer[]> {
   const [buyers, saved] = await Promise.all([
     getDocs(collection(db, 'buyers'))
@@ -192,10 +194,13 @@ export async function listCustomers(): Promise<Customer[]> {
     // Only an explicit isActive: false hides a buyer, so older records without the field still show.
     if (b.isActive === false) continue;
     const name = String(b.name || '').trim();
+    // Kapetto is not shown in this app (owner, 23 Nov 2026); its buyer record (K-01) stays as it is.
+    if (HIDDEN_CUSTOMER.test(name)) continue;
     if (name) byKey.set(name.toLowerCase(), { name, code: String(b.code || '').trim() || null });
   }
   for (const n of saved) {
     const name = n.trim();
+    if (HIDDEN_CUSTOMER.test(name)) continue;
     if (!byKey.has(name.toLowerCase())) byKey.set(name.toLowerCase(), { name, code: null });
   }
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));

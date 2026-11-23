@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 
 /**
- * Everything that is not the rug library. Still reachable, no longer competing
- * with it for attention on the home screen.
+ * Everything that is not the rug library. Off the sidebar since 23 Nov 2026
+ * (owner): reached only at /more, and each page by its own URL.
  */
 const ITEMS = [
   {
@@ -14,11 +14,6 @@ const ITEMS = [
     to: '/sample-bazar',
     title: 'Sample Bazar',
     blurb: 'Studio thumbnails for Sample Bazar products.',
-  },
-  {
-    to: '/kapetto',
-    title: 'Kapetto Kits',
-    blurb: 'Per-product photos and kit history for Kapetto sample kits.',
   },
 ];
 
