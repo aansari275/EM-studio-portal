@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, getDownloadURL } from 'firebase/storage';
+import { uploadWithProgress, type UploadStatus } from './uploadPrep';
 import { db, storage } from './firebase';
 import type { Actor } from './auth';
 import { patchOnExit } from './exitSave';
@@ -44,12 +45,12 @@ export async function loadBgDraft(uid: string): Promise<BgPhoto[]> {
   return Array.isArray(photos) ? (photos as BgPhoto[]).filter((p) => p && p.url) : [];
 }
 
-export async function uploadBgFile(uid: string, file: File): Promise<RemoteFile> {
+export async function uploadBgFile(uid: string, file: File, onStatus?: (s: UploadStatus) => void): Promise<RemoteFile> {
   const ext = EXT[file.type] || 'jpg';
   const name = `${safeBase(file.name)}.${ext}`;
   const path = `${folder(uid)}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${name}`;
   const sref = ref(storage, path);
-  await uploadBytes(sref, file, { contentType: file.type || 'image/jpeg' });
+  await uploadWithProgress(sref, file, { contentType: file.type || 'image/jpeg' }, onStatus);
   return { url: await getDownloadURL(sref), path, name, uploadedAt: new Date().toISOString() };
 }
 

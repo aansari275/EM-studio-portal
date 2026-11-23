@@ -4,6 +4,7 @@ import { db, storage, invalidateShowroomCache, mapShowroomData, styleSlug, deriv
 import { currentUserEmail, auth } from './auth';
 import { onIdTokenChanged } from 'firebase/auth';
 import { orderedImages } from './img';
+import { prepareUpload, uploadWithProgress, type UploadStatus } from './uploadPrep';
 import { parseSlideLayout, toFrac, isDefaultSlots, type Box, type SlideLayout } from './deckSlots';
 
 /**
@@ -40,7 +41,8 @@ const showroomRef = (p: ShowroomProduct) => doc(db, 'showroom_products', p.id);
 export async function uploadEditPhotos(
   p: ShowroomProduct,
   files: File[],
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  onStatus?: (i: number, s: UploadStatus) => void
 ): Promise<string[]> {
   const folder = isArchive(p)
     ? `em-products/${p.id.slice(3)}`
@@ -48,18 +50,14 @@ export async function uploadEditPhotos(
   const urls: string[] = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-    let body: Blob = file;
-    try {
-      const imageCompression = (await import('browser-image-compression')).default;
-      body = await imageCompression(file, { maxWidthOrHeight: 2000, maxSizeMB: 2, useWebWorker: true });
-    } catch {
-      /* upload the original rather than fail */
-    }
+    // A PNG cutout follows the 3 MB rule (uploadPrep.ts); JPEG is compressed as before.
+    const prep = await prepareUpload(file, onStatus ? (st) => onStatus(i, st) : undefined);
+    const ext = prep.type === 'image/png' ? 'png' : (file.name.split('.').pop() || 'jpg').toLowerCase();
     // A timestamp, not a sequence number, so a re-upload never overwrites a
     // file another record or an old buyer link still points at.
     const sref = ref(storage, `${folder}/edit-${Date.now()}-${i + 1}.${ext}`);
-    await uploadBytes(sref, body, { contentType: file.type || 'image/jpeg' });
+    await uploadWithProgress(sref, prep.body, { contentType: prep.type === 'image/png' ? 'image/png' : file.type || 'image/jpeg' },
+      onStatus ? (st) => onStatus(i, st) : undefined, prep.note);
     urls.push(await getDownloadURL(sref));
     onProgress?.(i + 1, files.length);
   }

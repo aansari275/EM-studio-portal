@@ -2,7 +2,8 @@ import {
   collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, runTransaction,
   serverTimestamp, Timestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, getDownloadURL } from 'firebase/storage';
+import { prepareUpload, uploadWithProgress, type UploadStatus } from './uploadPrep';
 import { db, storage } from './firebase';
 import { currentUserEmail, type Actor } from './auth';
 import { getSavedCustomers } from './options';
@@ -133,42 +134,28 @@ export async function getEntry(kind: EntryKind, id: string): Promise<StudioEntry
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
 
 /**
- * Same compression as library uploads (2000px, 2 MB), with two guards: a PNG
- * must come back as a PNG, or its transparency would be lost, and the stored
- * contentType and extension always describe the bytes actually uploaded.
+ * PNG cutouts: stored as they are when within 3 MB and 2000px, else resized
+ * once (see `uploadPrep.ts`). JPEG: the same compression as library uploads
+ * (2000px, 2 MB). The stored contentType, extension and width/height always
+ * describe the bytes actually uploaded.
  */
-async function prepare(file: File): Promise<{ body: Blob; type: string; ext: string; width: number; height: number }> {
-  const type = file.type || 'image/jpeg';
-  let body: Blob = file;
-  try {
-    const imageCompression = (await import('browser-image-compression')).default;
-    const out = await imageCompression(file, { maxWidthOrHeight: 2000, maxSizeMB: 2, useWebWorker: true, fileType: type });
-    if (type !== 'image/png' || out.type === 'image/png') body = out;
-  } catch {
-    /* compression is a nicety; upload the original rather than fail */
-  }
-  const actual = body.type || type;
-  let width = 0, height = 0;
-  try {
-    const bmp = await createImageBitmap(body);
-    width = bmp.width; height = bmp.height;
-    bmp.close();
-  } catch {
-    /* size unknown, still worth keeping the photo */
-  }
-  return { body, type: actual, ext: EXT[actual] || 'jpg', width, height };
+async function prepare(file: File, onStatus?: (s: UploadStatus) => void) {
+  const p = await prepareUpload(file, onStatus, { jpegType: true });
+  return { ...p, ext: EXT[p.type] || 'jpg' };
 }
 
 const safeBase = (name: string) =>
   (name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'photo').slice(0, 60);
 
 /** One photo into an entry's folder, compressed like the others. For background uploads. */
-export async function uploadEntryPhoto(kind: EntryKind, id: string, file: File): Promise<EntryPhoto> {
-  const p = await prepare(file);
+export async function uploadEntryPhoto(
+  kind: EntryKind, id: string, file: File, onStatus?: (s: UploadStatus) => void
+): Promise<EntryPhoto> {
+  const p = await prepare(file, onStatus);
   const name = `${safeBase(file.name)}.${p.ext}`;
   const path = `${FOLDER[kind]}/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${name}`;
   const sref = ref(storage, path);
-  await uploadBytes(sref, p.body, { contentType: p.type });
+  await uploadWithProgress(sref, p.body, { contentType: p.type }, onStatus, p.note);
   return { url: await getDownloadURL(sref), path, name, width: p.width, height: p.height, uploadedAt: new Date().toISOString() };
 }
 

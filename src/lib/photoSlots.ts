@@ -1,4 +1,5 @@
 import { normaliseAll } from './imageIntake';
+import type { Job } from './jobStatus';
 
 /**
  * One photo tile in a PhotoPicker. Every tile starts by going through photo
@@ -47,6 +48,13 @@ export type Slot = {
   send?: { state: 'sending' | 'waiting' | 'failed'; message?: string };
   /** Where it was sent, for the note under the tile: "Sent to Custom Rugs, ABC, 22 Nov". */
   sent?: string;
+
+  /**
+   * What is running on it right now, in words (opening, cutting, reducing,
+   * uploading), with its place in the batch. Display only: the flags above
+   * still decide what may happen to the tile.
+   */
+  job?: Job;
 };
 
 /** A file in Storage. */
@@ -70,12 +78,18 @@ export const isBusySlot = (s: Slot) => !!(s.converting || s.working);
 export function addFilesAsSlots(list: FileList | File[] | null | undefined, update: SlotUpdate): void {
   const files = [...(list || [])];
   if (!files.length) return;
-  const added: Slot[] = files.map((file) => ({ id: newSlotId(), file, converting: true }));
+  const of = files.length;
+  const added: Slot[] = files.map((file, i) => ({
+    id: newSlotId(), file, converting: true, job: { label: 'Waiting', detail: file.name, ...(of > 1 ? { n: i + 1, of } : {}) },
+  }));
   update((cur) => [...cur, ...added]);
   void normaliseAll(files, (i, r) => {
     const id = added[i].id;
     update((cur) => cur.map((s) => (s.id !== id ? s
-      : r.ok ? { id, file: r.file } : { ...s, converting: false, rejected: r.error })));
+      : r.ok ? { id, file: r.file } : { ...s, converting: false, job: undefined, rejected: r.error })));
+  }, 2, (i) => {
+    const id = added[i].id;
+    update((cur) => cur.map((s) => (s.id === id && s.job ? { ...s, job: { ...s.job, label: 'Opening' } } : s)));
   });
 }
 

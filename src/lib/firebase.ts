@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { fixStorageUrl } from './img';
 import { parseSlideLayout, type SlideLayout } from './deckSlots';
+import { prepareUpload, uploadWithProgress, type UploadStatus } from './uploadPrep';
 import {
   getFirestore,
   collection,
@@ -1660,7 +1661,8 @@ export async function createShowroomProduct(input: NewProductInput): Promise<Sho
 export async function addProductPhotos(
   product: ShowroomProduct,
   files: File[],
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  onStatus?: (i: number, s: UploadStatus) => void
 ): Promise<ShowroomProduct> {
   if (!files.length) return product;
   // The doc id, not the style number: a duplicate number has its own id
@@ -1685,19 +1687,15 @@ export async function addProductPhotos(
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
     // Originals run 3500-4000px and up to 11 MB. Nothing downstream needs more
     // than ~2000px, and the buyer link is resized again by the image CDN.
-    let body: Blob = file;
-    try {
-      const imageCompression = (await import('browser-image-compression')).default;
-      body = await imageCompression(file, { maxWidthOrHeight: 2000, maxSizeMB: 2, useWebWorker: true });
-    } catch {
-      /* compression is a nicety; upload the original rather than fail */
-    }
+    // A PNG cutout follows the 3 MB rule instead (uploadPrep.ts).
+    const prep = await prepareUpload(file, onStatus ? (st) => onStatus(i, st) : undefined);
+    const ext = prep.type === 'image/png' ? 'png' : (file.name.split('.').pop() || 'jpg').toLowerCase();
     const name = !hero && i === 0 ? `main.${ext}` : `image-${seq++}.${ext}`;
     const sref = ref(storage, `products/${slug}/${name}`);
-    await uploadBytes(sref, body, { contentType: file.type || 'image/jpeg' });
+    await uploadWithProgress(sref, prep.body, { contentType: prep.type === 'image/png' ? 'image/png' : file.type || 'image/jpeg' },
+      onStatus ? (st) => onStatus(i, st) : undefined, prep.note);
     const url = await getDownloadURL(sref);
     if (!hero && i === 0) hero = url;
     else extras.push(url);

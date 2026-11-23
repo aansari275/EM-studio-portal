@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Plus, X, Undo2, Scissors, Download } from 'lucide-react';
 import { ACCEPT } from '../lib/imageIntake';
+import { Working, Spinner } from './Working';
+import { busySummary, CUT_LABEL, type Job } from '../lib/jobStatus';
 import {
   addFilesAsSlots, isBusySlot, isReadySlot, isSyncedSlot, replaceFile, restoreOriginal, type Slot, type SlotUpdate,
 } from '../lib/photoSlots';
@@ -86,18 +88,24 @@ export function PhotoPicker({
     if (!todo.length) return;
     setCutting(true);
     const ids = new Set(todo.map((s) => s.id));
-    onChange((cur) => cur.map((s) => (ids.has(s.id) ? { ...s, working: true, failed: undefined } : s)));
-    for (const slot of todo) {
+    const of = todo.length;
+    const at = (i: number) => (of > 1 ? { n: i + 1, of } : {});
+    onChange((cur) => cur.map((s) => (ids.has(s.id)
+      ? { ...s, working: true, failed: undefined, job: { label: 'Waiting', ...at(todo.findIndex((t) => t.id === s.id)) } } : s)));
+    for (let i = 0; i < todo.length; i++) {
+      const slot = todo[i];
+      const say = (label: string) => patch(slot.id, (s) => ({ ...s, job: { label, ...at(i) } }));
       try {
+        say(CUT_LABEL.finding);
         // The model runtime is ~1.5 MB of JS plus a 28 MB wasm, so it loads
         // only when someone actually asks for a background to be removed.
         const { removeBackground } = await import('../lib/bgremove');
-        const { file, keptPct, warning } = await removeBackground(slot.file);
+        const { file, keptPct, warning } = await removeBackground(slot.file, 2000, (st) => say(CUT_LABEL[st]));
         // A cutout of the photo as it came in keeps its framing, so the editor
         // can work from the full-resolution original later.
-        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, cutWarn: warning || undefined, working: false, cutOfOriginal: !s.original }));
+        patch(slot.id, (s) => replaceFile(s, file, { cut: true, keptPct, cutWarn: warning || undefined, working: false, job: undefined, cutOfOriginal: !s.original }));
       } catch (e) {
-        patch(slot.id, (s) => ({ ...s, working: false, failed: e instanceof Error ? e.message : 'failed' }));
+        patch(slot.id, (s) => ({ ...s, working: false, job: undefined, failed: e instanceof Error ? e.message : 'failed' }));
       }
     }
     setCutting(false);
@@ -115,7 +123,8 @@ export function PhotoPicker({
   const cutCount = slots.filter((s) => s.cut).length;
   const changedCount = slots.filter((s) => s.original).length;
   const canCut = slots.some((s) => !s.cut && isReadySlot(s));
-  const converting = slots.filter((s) => s.converting).length;
+  // One line for every tile that is busy, read out politely (no percentages).
+  const busyLine = busySummary(slots.filter((s) => s.job && (s.converting || s.working || s.syncing || s.send?.state === 'sending')).map((s) => s.job as Job));
   const rejected = slots.filter((s) => s.rejected).length;
   const failedCuts = slots.filter((s) => s.failed).length;
 
@@ -149,9 +158,8 @@ export function PhotoPicker({
               )}
 
               {s.converting && (
-                <span className="absolute inset-0 grid place-items-center bg-white/80 px-1 text-center text-[10px] font-semibold text-neutral-600">
-                  Opening…
-                  <span className="block max-w-full truncate font-normal text-neutral-400">{s.file.name}</span>
+                <span className="absolute inset-0 grid place-items-center bg-white/85 px-1 text-neutral-700">
+                  <Working key={s.job?.label} job={s.job || { label: 'Opening', detail: s.remote?.name || s.file.name }} />
                 </span>
               )}
               {s.failed && !s.working && (
@@ -161,8 +169,8 @@ export function PhotoPicker({
               )}
 
               {s.working && (
-                <span className="absolute inset-0 grid place-items-center bg-white/70 text-[10px] font-semibold text-neutral-600">
-                  Cutting…
+                <span className="absolute inset-0 grid place-items-center bg-white/80 px-1 text-neutral-700">
+                  <Working key={s.job?.label} job={s.job || { label: 'Removing the background' }} />
                 </span>
               )}
               {suspect && !s.working && !s.failed && (
@@ -178,13 +186,17 @@ export function PhotoPicker({
                       aria-label={`Retry uploading photo ${i + 1}`} className="underline underline-offset-2">Retry</button>
                   </span>
                 ) : s.syncing || !isSyncedSlot(s) ? (
-                  <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9px] font-semibold text-white">Uploading…</span>
+                  <span className="absolute inset-x-0 bottom-0 bg-white/90 px-1 py-0.5 text-neutral-800">
+                    <Working key={s.job?.label} compact job={s.job || { label: 'Uploading' }} />
+                  </span>
                 ) : (
                   <span className="absolute bottom-1 left-1 rounded-sm bg-white/90 px-1 text-[9px] font-semibold text-emerald-700">Saved</span>
                 )
               )}
               {s.send?.state === 'sending' && (
-                <span className="absolute inset-0 grid place-items-center bg-white/75 text-[10px] font-semibold text-neutral-700">Sending…</span>
+                <span className="absolute inset-0 grid place-items-center bg-white/85 px-1 text-neutral-700">
+                  <Working key={s.job?.label} job={s.job || { label: 'Sending' }} />
+                </span>
               )}
               {s.send?.state === 'waiting' && (
                 <span className="absolute inset-x-0 bottom-0 bg-[#2F4C69] px-1 py-0.5 text-center text-[9px] font-semibold text-white"
@@ -270,7 +282,7 @@ export function PhotoPicker({
         <div className="mt-2.5 flex flex-wrap items-center gap-3">
           <button type="button" onClick={cutAll} disabled={disabled || cutting || !canCut}
             className="flex items-center gap-1.5 rounded-sm border border-neutral-200 px-3 py-1.5 text-[12px] font-semibold hover:border-neutral-400 disabled:opacity-50">
-            <Scissors className="h-3.5 w-3.5" strokeWidth={2} />
+            {cutting ? <Spinner /> : <Scissors className="h-3.5 w-3.5" strokeWidth={2} />}
             {cutting ? 'Removing backgrounds…' : 'Remove backgrounds'}
           </button>
           <span className="text-[11.5px] text-neutral-400">
@@ -283,7 +295,7 @@ export function PhotoPicker({
         </div>
       )}
       <p aria-live="polite" className="mt-1.5 text-[11.5px] empty:hidden">
-        {converting > 0 && <span className="mr-3 text-neutral-500">Opening {converting} photo{converting > 1 ? 's' : ''}…</span>}
+        {busyLine && <span className="mr-3 block text-neutral-600">{busyLine}</span>}
         {rejected > 0 && (
           <span className="mr-3 block text-red-700">
             {slots.filter((s) => s.rejected).map((s) => <span key={s.id} className="block">{s.rejected}</span>)}

@@ -1,4 +1,5 @@
 import * as ort from 'onnxruntime-web';
+import type { CutStage } from './jobStatus';
 import { cropBox, cutoutWarning, finishCutout, maskStats, touchesEdge, type Box, type MaskStats } from './maskRefine';
 
 /**
@@ -25,6 +26,8 @@ const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
 
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
+/** The model is in memory, so the first-time download step is skipped. */
+let loaded = false;
 
 function loadSession(): Promise<ort.InferenceSession> {
   if (!sessionPromise) {
@@ -145,9 +148,21 @@ export interface Cutout {
  *    colour instead of the floor's, so no pale halo is left (`maskRefine.ts`).
  * The mask stats then decide the tile's "Check this" note.
  */
-export async function removeBackground(file: File, maxSide = 2000): Promise<Cutout> {
+export async function removeBackground(
+  file: File, maxSide = 2000, onStage?: (s: CutStage) => void
+): Promise<Cutout> {
   const t0 = performance.now();
+  // Each step is named on the tile, and the browser gets a frame to paint
+  // it before the model (which runs on this thread) takes over.
+  const stage = async (s: CutStage) => {
+    if (!onStage) return;
+    onStage(s);
+    await new Promise<void>((ok) => requestAnimationFrame(() => setTimeout(ok, 0)));
+  };
+  if (!loaded) await stage('model');
   const session = await loadSession();
+  loaded = true;
+  await stage('finding');
   const bmp = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const w = Math.max(1, Math.round(bmp.width * scale));
@@ -159,11 +174,13 @@ export async function removeBackground(file: File, maxSide = 2000): Promise<Cuto
   let cropRerun = false;
   const box = touchesEdge(mask, w, h) ? null : cropBox(mask, w, h);
   if (box && (box.w < w || box.h < h)) {
+    await stage('edge');
     const k = bmp.width / w;
     mask = placeMask(await runModel(session, bmp, box.x * k, box.y * k, box.w * k, box.h * k), w, h, box);
     cropRerun = true;
   }
   const t2 = performance.now();
+  await stage('cleanup');
 
   const full = document.createElement('canvas');
   full.width = w; full.height = h;
@@ -178,6 +195,7 @@ export async function removeBackground(file: File, maxSide = 2000): Promise<Cuto
   const alpha = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) alpha[i] = done[i * 4 + 3];
 
+  await stage('saving');
   const blob: Blob = await new Promise((res, rej) =>
     full.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the cut-out.'))), 'image/png')
   );

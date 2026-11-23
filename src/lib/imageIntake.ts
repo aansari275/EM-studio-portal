@@ -187,11 +187,13 @@ export async function normaliseAll(
   files: File[],
   onEach: (index: number, r: IntakeResult) => void,
   concurrency = 2,
+  onStart?: (index: number) => void,
 ): Promise<void> {
   let next = 0;
   const worker = async () => {
     while (next < files.length) {
       const i = next++;
+      onStart?.(i);
       try {
         onEach(i, { ok: true, file: await normaliseImage(files[i]) });
       } catch (e) {

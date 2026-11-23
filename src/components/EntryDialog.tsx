@@ -4,7 +4,7 @@ import { PhotoPicker, type Slot } from './PhotoPicker';
 import {
   fillSavedSlots, isSyncedSlot, needsUpload, placeholderSlots, savedPhotos,
 } from '../lib/photoSlots';
-import { usePhotoSync } from '../lib/usePhotoSync';
+import { usePhotoSync, type SyncUpload } from '../lib/usePhotoSync';
 import { useAutosave } from '../lib/useAutosave';
 import { CustomerPicker } from './CustomerPicker';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -97,7 +97,7 @@ export function EntryDialog({
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   // ─── photos upload in the background ──────────────────────────────────
-  const upload = useCallback((f: File) => uploadEntryPhoto(kind, id, f), [kind, id]);
+  const upload = useCallback<SyncUpload>((f, on) => uploadEntryPhoto(kind, id, f, on), [kind, id]);
   usePhotoSync(slots, setSlots, upload);
 
   // A saved entry has no tile editing for its photos, so an uploaded tile

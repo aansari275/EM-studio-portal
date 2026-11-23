@@ -5,6 +5,7 @@ import {
   createShowroomProduct, addProductPhotos, findDuplicateStyle, styleKey, variantStyleNumber,
   type ShowroomProduct,
 } from '../lib/firebase';
+import { uploadLine } from '../lib/jobStatus';
 import { getLibraryVariants } from '../lib/library';
 import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } from '../lib/options';
 import { PhotoPicker } from './PhotoPicker';
@@ -165,8 +166,8 @@ export function NewProduct({
       const photos = slots.filter(isReadySlot).map((s) => s.file);
       if (photos.length) {
         created = await addProductPhotos(created, photos, (done, total) =>
-          setBusy(done === total ? 'Finishing…' : `Uploading ${done + 1} of ${total}…`)
-        );
+          setBusy(done === total ? 'Finishing…' : `Uploading ${done + 1} of ${total}…`),
+        (i, st) => setBusy(uploadLine(i, photos.length, st)));
       }
       onCreated(created);
     } catch (e) {

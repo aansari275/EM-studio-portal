@@ -4,6 +4,7 @@ import { X, Plus, Star } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import { getStudioOptions, addStudioOption, DEFAULT_OPTIONS, type OptionKind } from '../lib/options';
 import { updateProduct, uploadEditPhotos } from '../lib/productEdit';
+import { uploadLine } from '../lib/jobStatus';
 import { orderedImages, thumb } from '../lib/img';
 import { PhotoPicker } from './PhotoPicker';
 import { isBusySlot, isReadySlot, type Slot } from '../lib/photoSlots';
@@ -75,7 +76,8 @@ export function EditProduct({
       if (files.length) {
         setBusy(`Uploading 1 of ${files.length}…`);
         added = await uploadEditPhotos(product, files, (done, total) =>
-          setBusy(done === total ? 'Saving…' : `Uploading ${done + 1} of ${total}…`));
+          setBusy(done === total ? 'Saving…' : `Uploading ${done + 1} of ${total}…`),
+        (i, st) => setBusy(uploadLine(i, files.length, st)));
       }
       setBusy('Saving…');
       const saved = await updateProduct(product, {

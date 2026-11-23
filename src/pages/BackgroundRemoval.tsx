@@ -18,7 +18,9 @@ import {
 import { newEntryId, uploadEntryPhoto } from '../lib/studioEntries';
 import { appendDesignPhotos } from '../lib/designAppend';
 import { designIO } from '../lib/designIO';
-import { usePhotoSync } from '../lib/usePhotoSync';
+import { tileJob, type Job, type Step } from '../lib/jobStatus';
+import { Spinner } from '../components/Working';
+import { usePhotoSync, type SyncUpload } from '../lib/usePhotoSync';
 import { useAutosave } from '../lib/useAutosave';
 import { currentActor } from '../lib/auth';
 import { loadBgDraft, saveBgDraft, saveBgDraftOnExit, uploadBgFile, type BgPhoto } from '../lib/bgDraft';
@@ -57,7 +59,7 @@ export function BackgroundRemoval() {
     return () => { live = false; };
   }, [actor]);
 
-  const upload = useCallback((f: File) => uploadBgFile(actor!.uid, f), [actor]);
+  const upload = useCallback<SyncUpload>((f, on) => uploadBgFile(actor!.uid, f, on), [actor]);
   usePhotoSync(slots, setSlots, actor && loaded === 'ready' ? upload : null);
 
   const photos = useMemo<BgPhoto[]>(() => {
@@ -113,14 +115,18 @@ export function BackgroundRemoval() {
   }), []);
 
   const markSend = (ids: Set<string>, send: Slot['send']) =>
-    setSlots((cur) => cur.map((s) => (ids.has(s.id) ? { ...s, send } : s)));
+    setSlots((cur) => cur.map((s) => (ids.has(s.id) ? { ...s, send, job: send?.state === 'sending' ? s.job : undefined } : s)));
   const failOne = (id: string, message: string) =>
-    setSlots((cur) => cur.map((s) => (s.id === id ? { ...s, send: { state: 'failed', message } } : s)));
+    setSlots((cur) => cur.map((s) => (s.id === id ? { ...s, send: { state: 'failed', message }, job: undefined } : s)));
+  /** The words on a tile while it is sent (only while it is still being sent). */
+  const setJob = (id: string, job: Job | undefined) =>
+    setSlots((cur) => cur.map((s) => (s.id === id && s.send?.state === 'sending' ? { ...s, job } : s)));
+  const at = (i: number, of: number) => (of > 1 ? { n: i + 1, of } : {});
   /** Sent: a note on the tile, or off the page when she asked for that. Nothing is deleted. */
   const settle = (ids: Set<string>, note: string, removeAfter: boolean) => {
     setSlots((cur) => (removeAfter
       ? cur.filter((s) => !ids.has(s.id))
-      : cur.map((s) => (ids.has(s.id) ? { ...s, send: undefined, sent: note } : s))));
+      : cur.map((s) => (ids.has(s.id) ? { ...s, send: undefined, job: undefined, sent: note } : s))));
     setSelected((cur) => new Set([...cur].filter((id) => !ids.has(id))));
   };
 
@@ -156,12 +162,21 @@ export function BackgroundRemoval() {
         const entryId = target.entry?.id || sameNew || newEntryId(kind);
         last.current = { target, removeAfter, entryId };
         markSend(ids, { state: 'sending' });
-        const done = await Promise.all(list.map((s) => run(async () => {
+        list.forEach((s, i) => setJob(s.id, { label: 'Waiting', ...at(i, list.length) }));
+        const done = await Promise.all(list.map((s, i) => run(async () => {
           try {
+            setJob(s.id, { label: isReadySlot(s) && s.file.size > 0 ? 'Getting ready' : 'Fetching from your draft', ...at(i, list.length) });
             const { file, original } = await bytesOf(s);
+            let mainStep: Step = { stage: 'uploading', pct: 0 };
+            let origStep: Step | undefined = original ? { stage: 'uploading', pct: 0 } : undefined;
+            const say = () => setJob(s.id, tileJob(mainStep, origStep, { n: i + 1, of: list.length }));
             const [main, orig] = await Promise.all([
-              uploadEntryPhoto(kind, entryId, file),
-              original ? uploadEntryPhoto(kind, entryId, original) : Promise.resolve(null),
+              uploadEntryPhoto(kind, entryId, file, (st) => { mainStep = st; say(); })
+                .then((r) => { mainStep = { stage: 'done' }; say(); return r; }),
+              original
+                ? uploadEntryPhoto(kind, entryId, original, (st) => { origStep = st; say(); })
+                  .then((r) => { origStep = { stage: 'done' }; say(); return r; })
+                : Promise.resolve(null),
             ]);
             const slot: Slot = {
               id: newSlotId(), file, original, cut: s.cut, keptPct: s.keptPct, cutOfOriginal: s.cutOfOriginal,
@@ -187,6 +202,7 @@ export function BackgroundRemoval() {
       last.current = { target, removeAfter };
       // Library: fetch any photo not in memory first.
       markSend(ids, { state: 'sending' });
+      list.forEach((s, i) => setJob(s.id, { label: 'Getting ready', ...at(i, list.length) }));
       const got = await Promise.all(list.map((s) => run(async () => {
         try { return { s, ...(await bytesOf(s)) }; } catch (e) { failOne(s.id, msg(e)); return null; }
       })));
@@ -212,10 +228,13 @@ export function BackgroundRemoval() {
       let product = target.product;
       let okIds = new Set<string>();
       try {
+        ready.forEach((g, i) => setJob(g.s.id, { label: 'Waiting', ...at(i, ready.length) }));
         const res = await appendDesignPhotos(target.product, ready.map((g) => g.file), designIO, (i, err) => {
           if (err) failOne(ready[i].s.id, err);
           else okIds.add(ready[i].s.id);
-        });
+        }, (i, st) => setJob(ready[i].s.id, st.stage === 'done'
+          ? { label: 'Saving to the design', ...at(i, ready.length) }
+          : tileJob(st, undefined, { n: i + 1, of: ready.length })));
         product = res.product;
       } catch (e) {
         okIds = new Set();
@@ -242,6 +261,8 @@ export function BackgroundRemoval() {
   async function downloadAll() {
     setZipping(true);
     setError('');
+    // the zip is built on this thread: let the button say so first
+    await new Promise<void>((ok) => requestAnimationFrame(() => setTimeout(ok, 0)));
     try {
       await saveZip(ready.map((s) => ({ name: s.file.name, blob: s.file })), `photos-${today()}.zip`);
     } catch {
@@ -267,7 +288,7 @@ export function BackgroundRemoval() {
         </p>
 
         {loaded === 'loading' ? (
-          <p className="mt-7 text-[13px] text-neutral-400">Opening your draft…</p>
+          <p role="status" className="mt-7 flex items-center gap-2 text-[13px] text-neutral-500"><Spinner /> Opening your draft…</p>
         ) : loaded === 'failed' ? (
           <p role="alert" className="mt-7 text-[13px] text-red-700">
             Could not open your saved draft. Reload the page to try again. Nothing in it has been changed.
@@ -301,7 +322,7 @@ export function BackgroundRemoval() {
               <button type="button" onClick={() => setPicking(true)} disabled={!chosen.length || sending}
                 aria-haspopup="dialog"
                 className="flex items-center gap-1.5 rounded-sm border border-[#2F4C69] px-3 py-1.5 text-[12.5px] font-semibold text-[#2F4C69] hover:bg-[#2F4C69]/5 disabled:border-neutral-200 disabled:text-neutral-400">
-                <Send className="h-3.5 w-3.5" strokeWidth={2} />
+                {sending ? <Spinner /> : <Send className="h-3.5 w-3.5" strokeWidth={2} />}
                 {sending ? 'Sending…' : 'Send to'}
               </button>
             </div>
@@ -326,8 +347,8 @@ export function BackgroundRemoval() {
           <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-neutral-100 pt-5">
             <button type="button" onClick={downloadAll} disabled={zipping || busy || !ready.length}
               className="flex items-center gap-2 rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
-              <Download className="h-4 w-4" strokeWidth={2} />
-              {zipping ? 'Making the zip…' : `Download all (${ready.length})`}
+              {zipping ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" strokeWidth={2} />}
+              {zipping ? `Making the zip, ${ready.length} photo${ready.length > 1 ? 's' : ''}…` : `Download all (${ready.length})`}
             </button>
             <button type="button" disabled={busy} onClick={() => setClearing(true)}
               className="text-[13px] text-neutral-500 hover:text-neutral-900 disabled:opacity-50">

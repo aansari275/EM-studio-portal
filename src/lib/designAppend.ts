@@ -1,6 +1,7 @@
 import type { ShowroomProduct } from './firebase';
 import type { ProductEdit } from './productEdit';
 import { orderedImages } from './img';
+import type { Step } from './jobStatus';
 
 /**
  * Adding photos to an existing design from outside Edit design (Background
@@ -17,7 +18,11 @@ import { orderedImages } from './img';
 export interface DesignIO {
   /** The design as stored now (the search result may be minutes old). */
   fresh: (p: ShowroomProduct) => Promise<ShowroomProduct>;
-  upload: (p: ShowroomProduct, files: File[]) => Promise<string[]>;
+  upload: (
+    p: ShowroomProduct, files: File[],
+    onProgress?: (done: number, total: number) => void,
+    onStatus?: (i: number, s: Step) => void,
+  ) => Promise<string[]>;
   update: (p: ShowroomProduct, e: ProductEdit) => Promise<ShowroomProduct>;
 }
 
@@ -42,7 +47,9 @@ export async function appendDesignPhotos(
   p: ShowroomProduct,
   files: File[],
   io: DesignIO,
-  onEach?: (i: number, error?: string) => void
+  onEach?: (i: number, error?: string) => void,
+  /** Each file's steps (reducing, uploading, done), for the tile. */
+  onStatus?: (i: number, s: Step) => void
 ): Promise<{ product: ShowroomProduct; failed: number[] }> {
   const fresh = await io.fresh(p);
   const urls: string[] = [];
@@ -50,8 +57,9 @@ export async function appendDesignPhotos(
   const ok: number[] = [];
   for (let i = 0; i < files.length; i++) {
     try {
-      const [url] = await io.upload(fresh, [files[i]]);
+      const [url] = await io.upload(fresh, [files[i]], undefined, onStatus ? (_, st) => onStatus(i, st) : undefined);
       if (!url) throw new Error('The upload gave no address.');
+      onStatus?.(i, { stage: 'done' });
       urls.push(url);
       ok.push(i);
     } catch (e) {

@@ -10,6 +10,8 @@ import { jpegFocal35 } from '../lib/imageFormat';
 import { decontaminate } from '../lib/maskRefine';
 import { useTabActive } from '../lib/tabContext';
 import { SizePanel } from './PhotoEditorSize';
+import { Spinner } from './Working';
+import { useSlow } from '../lib/useSlow';
 import { EMPTY_SIZE, ratioText, estimateNote, type SizeFields } from '../lib/rugSize';
 
 /**
@@ -66,6 +68,7 @@ export default function PhotoEditor({
   const [settings, setSettings] = useState<EditSettings>(DEFAULT_SETTINGS);
   const [comparing, setComparing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const slow = useSlow(busy);
   /** What Auto last used, shown under Levels. */
   const [autoNote, setAutoNote] = useState('');
   const [autoBusy, setAutoBusy] = useState(false);
@@ -377,8 +380,14 @@ export default function PhotoEditor({
           <button type="button" onClick={onClose} disabled={busy} className="text-[13px] text-neutral-500 hover:text-neutral-900">
             Cancel
           </button>
+          {busy && (
+            <span role="status" className="text-[12px] text-neutral-500">
+              {slow ? 'Still working, large photo' : 'Applying at full size'}
+            </span>
+          )}
           <button type="button" onClick={apply} disabled={!bmp || busy}
-            className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
+            className="flex items-center gap-1.5 rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
+            {busy && <Spinner />}
             {busy ? 'Applying…' : 'Apply'}
           </button>
         </div>
