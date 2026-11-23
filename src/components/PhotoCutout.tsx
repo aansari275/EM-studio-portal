@@ -1,6 +1,9 @@
-import { Eraser, Undo2 } from 'lucide-react';
+import { lazy, Suspense } from 'react';
+import { Brush, Eraser, Undo2 } from 'lucide-react';
 import { ROUND_BUTTON as ROUND, type CutoutApi } from '../lib/useCutout';
 import { Spinner, Working } from './Working';
+
+const TouchUpDialog = lazy(() => import('./TouchUp'));
 
 /** Remove background in the Library preview: the button, the status over the photo, the Keep / Undo bar. Logic in lib/useCutout.ts. */
 
@@ -21,6 +24,29 @@ export function CutoutButton({ cut, disabled }: { cut: CutoutApi; disabled?: boo
         ? <Undo2 className="h-4 w-4" strokeWidth={2} />
         : <Eraser className="h-4 w-4" strokeWidth={2} />}
     </button>
+  );
+}
+
+/** The round Touch up button on a kept cutout (one with its original on record). */
+export function TouchUpButton({ cut, disabled }: { cut: CutoutApi; disabled?: boolean }) {
+  if (!cut.original || cut.result) return null;
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); void cut.touch(); }}
+      disabled={disabled || cut.busy} aria-label="Touch up" title="Touch up: bring back fringe or erase bits of floor"
+      className={ROUND}>
+      <Brush className="h-4 w-4" strokeWidth={2} />
+    </button>
+  );
+}
+
+/** The Touch up window, while open. */
+export function CutoutTouch({ cut }: { cut: CutoutApi }) {
+  if (!cut.touching) return null;
+  return (
+    <Suspense fallback={null}>
+      <TouchUpDialog cut={cut.touching.cut} original={cut.touching.original} direct={cut.touching.direct}
+        onApply={cut.touchDone} onClose={cut.closeTouch} />
+    </Suspense>
   );
 }
 
@@ -62,10 +88,15 @@ export function CutoutBar({ cut }: { cut: CutoutApi }) {
       className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-sm border border-neutral-200 bg-white px-3 py-2 text-[12.5px]">
       <span className="min-w-0 flex-1">
         {cut.result.warning
-          ? <span className="font-semibold text-[#98671A]">{cut.result.warning}</span>
-          : <span className="text-neutral-600">Background removed. Nothing is saved until you keep it.</span>}
+          ? <span className="font-semibold text-[#98671A]">{cut.result.warning} Touch up can fix it.</span>
+          : <span className="text-neutral-600">{cut.result.touched ? 'Touched up.' : 'Background removed.'} Nothing is saved until you keep it.</span>}
       </span>
-      <span className="flex gap-2">
+      <span className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => void cut.touch()} disabled={cut.busy}
+          className={'flex min-h-[44px] items-center gap-1.5 rounded-sm border px-4 font-semibold disabled:opacity-50 ' +
+            (cut.result.warning ? 'border-[#98671A] text-[#7a5215] hover:bg-[#98671A]/10' : 'border-neutral-200 text-neutral-800 hover:border-neutral-400')}>
+          <Brush className="h-4 w-4" strokeWidth={2} /> Touch up
+        </button>
         <button type="button" onClick={cut.undo} disabled={cut.busy}
           className="min-h-[44px] rounded-sm border border-neutral-200 px-4 font-semibold text-neutral-800 hover:border-neutral-400 disabled:opacity-50">
           Undo

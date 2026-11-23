@@ -65,6 +65,9 @@ export function PhotoPicker({
   const [over, setOver] = useState(false);
   const [cutting, setCutting] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  /** Open the editor on Touch up (from a Check this note). */
+  const [touchFirst, setTouchFirst] = useState(false);
+  const edit = (i: number, touch = false) => { setTouchFirst(touch); setEditing(i); };
 
   useEffect(() => {
     // only decodable files get a preview; a tile still converting shows its state instead
@@ -113,8 +116,14 @@ export function PhotoPicker({
 
   const undo = (id: string) => patch(id, restoreOriginal);
 
-  const edited = (id: string, file: File) => {
-    patch(id, (s) => replaceFile(s, file, { cutOfOriginal: false }));
+  // A touch up alone keeps the cutout a direct cut of its original (same
+  // framing, alpha and original pixels only), so it can be touched up again
+  // and the editor still samples the full-resolution original. Her look
+  // answers the Check this note, so the note goes.
+  const edited = (id: string, file: File, info: { touchOnly: boolean }) => {
+    patch(id, (s) => replaceFile(s, file, info.touchOnly
+      ? { cutOfOriginal: s.cutOfOriginal, cutWarn: undefined, keptPct: undefined }
+      : { cutOfOriginal: false }));
     setEditing(null);
   };
 
@@ -150,8 +159,8 @@ export function PhotoPicker({
                   <span className="line-clamp-2">{s.file.name}</span>
                 </div>
               ) : (
-                <button type="button" onClick={() => setEditing(i)} disabled={disabled || isBusySlot(s)}
-                  aria-label={`Edit photo ${i + 1}`} title="Edit: fix skew, straighten, crop, tone"
+                <button type="button" onClick={() => edit(i)} disabled={disabled || isBusySlot(s)}
+                  aria-label={`Edit photo ${i + 1}`} title={s.cut ? 'Edit: touch up, fix skew, straighten, crop, tone' : 'Edit: fix skew, straighten, crop, tone'}
                   className="block h-full w-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2F4C69]">
                   {urls[i] && <img src={urls[i]} alt="" className="h-full w-full object-contain" />}
                 </button>
@@ -250,8 +259,15 @@ export function PhotoPicker({
                 </button>
               </div>
             </div>
-            {suspect && s.cutWarn && !s.working && (
-              <p className="mt-1 line-clamp-3 text-[10px] leading-tight text-[#7a5215]" title={s.cutWarn}>{s.cutWarn}</p>
+            {suspect && !s.working && !s.failed && (
+              <>
+                {s.cutWarn && <p className="mt-1 line-clamp-3 text-[10px] leading-tight text-[#7a5215]" title={s.cutWarn}>{s.cutWarn}</p>}
+                <button type="button" onClick={() => edit(i, true)} disabled={disabled || isBusySlot(s)}
+                  aria-label={`Touch up photo ${i + 1}`}
+                  className="mt-0.5 min-h-[44px] w-full rounded-sm border border-[#98671A]/40 px-1 text-[11px] font-semibold text-[#7a5215] hover:bg-[#98671A]/10 disabled:opacity-50">
+                  Touch up
+                </button>
+              </>
             )}
             {s.sent && (
               <p className="mt-1 line-clamp-2 text-[10px] leading-tight text-[#2F4C69]" title={s.sent}>{s.sent}</p>
@@ -314,7 +330,9 @@ export function PhotoPicker({
           <PhotoEditor file={slots[editing].file}
             full={slots[editing].cutOfOriginal ? slots[editing].original : undefined}
             cameraFrame={!slots[editing].original || !!slots[editing].cutOfOriginal}
-            onApply={(f) => edited(slots[editing].id, f)} onClose={() => setEditing(null)} />
+            hasOriginal={!!slots[editing].original}
+            initialTool={touchFirst ? 'touch' : undefined}
+            onApply={(f, info) => edited(slots[editing].id, f, info)} onClose={() => setEditing(null)} />
         </Suspense>
       )}
 

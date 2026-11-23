@@ -25,7 +25,7 @@ import type { SlideLayout } from '../lib/deckSlots';
 import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
-import { CutoutButton, CutoutWorking, CutoutBar } from '../components/PhotoCutout';
+import { CutoutButton, CutoutWorking, CutoutBar, CutoutTouch, TouchUpButton } from '../components/PhotoCutout';
 import { useCutout, ROUND_BUTTON } from '../lib/useCutout';
 import { useTabActive } from '../lib/tabContext';
 import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
@@ -677,6 +677,7 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
                     <RotateButton onClick={turn.rotate} busy={turn.busy} disabled={cut.busy || !!cut.result}
                       label="Turn this photo 90° clockwise" className={ROUND_BUTTON + ' [&_svg]:h-4 [&_svg]:w-4'} />
                     <CutoutButton cut={cut} disabled={turn.pendingTurn} />
+                    <TouchUpButton cut={cut} disabled={turn.pendingTurn} />
                   </div>
                   <CutoutWorking cut={cut} />
                   {turn.error && (
@@ -688,6 +689,7 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
               )}
             </div>
             <CutoutBar cut={cut} />
+            <CutoutTouch cut={cut} />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <PhotoOrder product={product} photos={gallery} shot={shot} onShot={setShot}
                 onSaved={(p) => onChanged?.(p)} />

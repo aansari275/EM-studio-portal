@@ -22,7 +22,15 @@ import { keepCutoutPhoto, restoreOriginalPhoto } from './productEdit';
 
 export type CutoutApi = ReturnType<typeof useCutout>;
 
-type Result = { file: File; preview: string; warning: string | null };
+type Result = {
+  file: File; preview: string; warning: string | null;
+  /** The photo it was cut from, for Touch up's Bring back. */
+  source: File | null;
+  /** Touch up was applied to it. */
+  touched?: boolean;
+};
+/** What Touch up opens on: the cutout and the photo it was cut from. */
+export type TouchJob = { cut: File; original: File | null; direct: boolean };
 
 export function useCutout(
   product: ShowroomProduct, url: string,
@@ -32,6 +40,7 @@ export function useCutout(
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
+  const [touching, setTouching] = useState<TouchJob | null>(null);
   const gen = useRef(0);
   const mounted = useRef(true);
   const resultRef = useRef<Result | null>(null);
@@ -40,7 +49,7 @@ export function useCutout(
   const reset = () => {
     gen.current += 1;
     if (resultRef.current) URL.revokeObjectURL(resultRef.current.preview);
-    setJob(null); setResult(null); setError(null);
+    setJob(null); setResult(null); setError(null); setTouching(null);
   };
   // Another photo or design starts clean; a result for the old one is dropped.
   // Keyed on id and url only, so a slide layout saved meanwhile does not drop it.
@@ -86,7 +95,7 @@ export function useCutout(
         performance.measure('libcut:remove', { start: t1, end: t2 });
       } catch { /* older browsers */ }
       if (!live()) return;
-      setResult({ file: cut.file, preview: URL.createObjectURL(cut.file), warning: cut.warning });
+      setResult({ file: cut.file, preview: URL.createObjectURL(cut.file), warning: cut.warning, source: file });
       setJob(null);
     } catch (e) {
       if (!live()) return;
@@ -134,7 +143,47 @@ export function useCutout(
     }
   }
 
-  return { run, undo, keep, restore, busy, job, result, error, original };
+  /**
+   * Touch up: on the cutout just made (its source is in memory), or on a
+   * kept cutout, whose original comes from `photoOriginals`. Either way the
+   * touched cutout becomes the result on show, and Keep saves it.
+   */
+  async function touch() {
+    if (busy) return;
+    if (result) { setTouching({ cut: result.file, original: result.source, direct: true }); return; }
+    if (!original || !url) return;
+    const mine = gen.current;
+    setError(null);
+    setJob({ label: 'Getting the photo' });
+    try {
+      const get = async (u: string) => {
+        const res = await fetch(fixStorageUrl(u)).catch(() => { throw new Error('Could not load the photo. Check the connection.'); });
+        if (!res.ok) throw new Error(`Could not load the photo (${res.status}).`);
+        const blob = await res.blob();
+        const name = decodeURIComponent(new URL(u).pathname.split('/').pop() || 'photo').split('/').pop() || 'photo';
+        return new File([blob], name, { type: blob.type });
+      };
+      const { normaliseImage } = await import('./imageIntake');
+      const [cutFile, origFile] = await Promise.all([get(url), get(original).then(normaliseImage)]);
+      if (mine !== gen.current) return;
+      setJob(null);
+      setTouching({ cut: cutFile, original: origFile, direct: true });
+    } catch (e) {
+      if (mine !== gen.current) return;
+      setJob(null);
+      setError({ message: e instanceof Error ? e.message : 'Could not open Touch up.', retry: touch });
+    }
+  }
+
+  function touchDone(file: File) {
+    const t = touching;
+    setTouching(null);
+    if (!t) return;
+    if (resultRef.current) URL.revokeObjectURL(resultRef.current.preview);
+    setResult({ file, preview: URL.createObjectURL(file), warning: null, source: t.original, touched: true });
+  }
+
+  return { run, undo, keep, restore, busy, job, result, error, original, touching, touch, touchDone, closeTouch: () => setTouching(null) };
 }
 
 /** The round buttons on the big photo in the preview (rotate, remove background): 44px targets. */

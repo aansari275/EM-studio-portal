@@ -13,9 +13,13 @@ import { SizePanel } from './PhotoEditorSize';
 import { Spinner } from './Working';
 import { useSlow } from '../lib/useSlow';
 import { EMPTY_SIZE, ratioText, estimateNote, type SizeFields } from '../lib/rugSize';
+import { renderStrokes, touchSource, EMPTY_HISTORY, NOT_DIRECT, type Stroke } from '../lib/touchUp';
+import { bitmapOf, prepareTouch, renderTouchFull, useTouchState } from '../lib/touchUpGlue';
+import { TouchCanvas, TouchPanel } from './TouchUp';
 
 /**
- * The photo editor: fix skew, straighten, crop and tone, in a modal.
+ * The photo editor: touch up (cutouts only), fix skew, straighten, crop, size
+ * and tone, in a modal.
  *
  * UI only. Every pixel operation is in lib/photoEdit.ts, and the preview
  * (about 1000px) runs the same code as the final render, so what she sees is
@@ -23,7 +27,9 @@ import { EMPTY_SIZE, ratioText, estimateNote, type SizeFields } from '../lib/rug
  * so the tile's undo can restore it.
  */
 
-type Tool = 'skew' | 'straighten' | 'crop' | 'size' | 'tone';
+type Tool = 'touch' | 'skew' | 'straighten' | 'crop' | 'size' | 'tone';
+/** First for a cutout, so skew, crop and the rest apply on top of the touched up cutout. */
+const TOUCH_TOOL: { id: Tool; label: string } = { id: 'touch', label: 'Touch up' };
 const TOOLS: { id: Tool; label: string }[] = [
   { id: 'skew', label: 'Fix skew' },
   { id: 'straighten', label: 'Straighten' },
@@ -46,7 +52,7 @@ const WORK_MAX = 6000;
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 export default function PhotoEditor({
-  file, full, cameraFrame = true, onApply, onClose,
+  file, full, cameraFrame = true, hasOriginal = false, initialTool, onApply, onClose,
 }: {
   file: File;
   /**
@@ -56,15 +62,22 @@ export default function PhotoEditor({
   full?: File;
   /** The photo is still the camera's own frame (not cropped or warped before). */
   cameraFrame?: boolean;
-  onApply: (edited: File) => void;
+  /** The tile keeps an original, even if `full` is not given (edited after the cut): says why Bring back is off. */
+  hasOriginal?: boolean;
+  /** Open on this step (Check this opens on Touch up). */
+  initialTool?: 'touch';
+  /** `touchOnly`: only Touch up changed it, so it is still a direct cut of the original. */
+  onApply: (edited: File, info: { touchOnly: boolean }) => void;
   onClose: () => void;
 }) {
   const [bmp, setBmp] = useState<ImageBitmap | null>(null);
   const [fullBmp, setFullBmp] = useState<ImageBitmap | null>(null);
+  /** The original finished decoding (or failed), so Touch up can start. */
+  const [fullDone, setFullDone] = useState(false);
   const [frame, setFrame] = useState<Frame>({});
   const [preview, setPreview] = useState<Px | null>(null);
   const [error, setError] = useState('');
-  const [tool, setTool] = useState<Tool>('skew');
+  const [picked, setTool] = useState<Tool | null>(initialTool ?? null);
   const [settings, setSettings] = useState<EditSettings>(DEFAULT_SETTINGS);
   const [comparing, setComparing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -96,7 +109,9 @@ export default function PhotoEditor({
     if (!full) return;
     let live = true;
     let made: ImageBitmap | null = null;
-    decode(full).then((b) => { made = b; if (live) setFullBmp(b); else b.close(); }).catch(() => {});
+    decode(full)
+      .then((b) => { made = b; if (live) { setFullBmp(b); setFullDone(true); } else b.close(); })
+      .catch(() => { if (live) setFullDone(true); });
     return () => { live = false; made?.close(); };
   }, [full]);
 
@@ -114,30 +129,58 @@ export default function PhotoEditor({
 
   useEffect(() => { dialog.current?.focus(); }, []);
 
-  const start = useMemo(() => (preview ? startQuad(preview) : null), [preview]);
+  // Touch up, for a cutout. `base` is the cutout as it came; `preview` below
+  // is it with the touch up strokes, which the other steps work on.
+  const base = preview;
+  const isCut = useMemo(() => !!base && hasAlpha(base), [base]);
+  const tool: Tool = picked ?? (isCut ? 'touch' : 'skew');
+  const tools = isCut ? [TOUCH_TOOL, ...TOOLS] : TOOLS;
+  const prepared = useMemo(() => {
+    if (!bmp || !isCut || (full && !fullDone)) return null;
+    const p = prepareTouch(bmp, fullBmp, !!full);
+    return !full && hasOriginal ? { ...p, reason: NOT_DIRECT } : p;
+  }, [bmp, isCut, full, fullDone, fullBmp, hasOriginal]);
+  const tabActive = useTabActive();
+  const touch = useTouchState(tabActive && tool === 'touch' && !busy, prepared);
+  const done = touch.state.history.done;
+  // The other steps see the strokes once she leaves Touch up (replaying on
+  // every stroke while painting would make the brush stutter).
+  const [seenDone, setSeenDone] = useState<Stroke[]>(done);
+  if (tool !== 'touch' && seenDone !== done) setSeenDone(done);
+  const wantOrig = seenDone.length > 0;
+  const origSmall = useMemo(
+    () => (base && fullBmp && prepared && !prepared.reason && wantOrig ? pixelsAt(fullBmp, base.width, base.height) : null),
+    [base, fullBmp, prepared, wantOrig]
+  );
+  const touched = useMemo(
+    () => (base && seenDone.length ? renderStrokes(base, touchSource(base, origSmall), seenDone) : base),
+    [base, origSmall, seenDone]
+  );
+
+  const start = useMemo(() => (touched ? startQuad(touched) : null), [touched]);
   const set = (patch: Partial<EditSettings>) => setSettings((s) => ({ ...s, ...patch }));
   const setTone = (patch: Partial<Tone>) => setSettings((s) => ({ ...s, tone: { ...s.tone, ...patch } }));
 
   // The view lags the sliders by a frame rather than making them stutter.
   const view = useDeferredValue(settings);
   const geometry = useMemo(() => {
-    if (!preview) return null;
-    if (tool === 'skew') return preview;
+    if (!touched) return null;
+    if (tool === 'skew' || tool === 'touch') return touched;
     try {
       const upTo = tool === 'tone' || tool === 'size' ? 'all' : 'straighten';
-      return warp(preview, plan(preview.width, preview.height, view, PREVIEW_SIDE, upTo, frame));
+      return warp(touched, plan(touched.width, touched.height, view, PREVIEW_SIDE, upTo, frame));
     } catch {
-      return preview; // corners in a line: show the photo until they are moved apart
+      return touched; // corners in a line: show the photo until they are moved apart
     }
-  }, [preview, tool, view, frame]);
+  }, [touched, tool, view, frame]);
 
   // How the shape is being decided (the estimate, the stretch in use), for
   // the Fix skew and Size panels. Cheap: no pixels involved.
   const info = useMemo(() => {
-    if (!preview) return null;
-    try { return plan(preview.width, preview.height, { ...settings, crop: null }, PREVIEW_SIDE, 'all', frame).info; }
+    if (!touched) return null;
+    try { return plan(touched.width, touched.height, { ...settings, crop: null }, PREVIEW_SIDE, 'all', frame).info; }
     catch { return null; }
-  }, [preview, settings, frame]);
+  }, [touched, settings, frame]);
 
   // The result's size in pixels, from the photo Apply will actually sample.
   const source = fullBmp || bmp;
@@ -153,26 +196,26 @@ export default function PhotoEditor({
   // reference: it is made neutral and near white, and the rug gets the same
   // correction. Otherwise only a small, hue-free correction.
   const runAuto = useCallback(async () => {
-    if (!preview || autoBusy) return;
+    if (!touched || autoBusy) return;
     setAutoBusy(true);
     try {
       let result = null as ReturnType<typeof autoTone> | null;
-      if (full && hasAlpha(preview)) {
+      if (full && hasAlpha(touched)) {
         try {
           const orig = fullBmp || await decode(full);
-          const ref = paperReference(pixelsAt(orig, preview.width, preview.height), preview);
+          const ref = paperReference(pixelsAt(orig, touched.width, touched.height), touched);
           if (orig !== fullBmp) orig.close();
-          result = 'ref' in ref ? autoTone(preview, ref.ref) : autoTone(preview, null, ref.miss);
+          result = 'ref' in ref ? autoTone(touched, ref.ref) : autoTone(touched, null, ref.miss);
         } catch { /* fall back below */ }
       }
-      if (!result) result = autoTone(geometry || preview, null);
+      if (!result) result = autoTone(geometry || touched, null);
       const r = result;
       setSettings((s) => ({ ...s, tone: { ...s.tone, ...r.patch } }));
       setAutoNote(r.note);
     } finally {
       setAutoBusy(false);
     }
-  }, [preview, geometry, full, fullBmp, autoBusy]);
+  }, [touched, geometry, full, fullBmp, autoBusy]);
 
   const shown = useMemo(
     () => (comparing ? preview : geometry && applyTone(geometry, view.tone)),
@@ -181,15 +224,30 @@ export default function PhotoEditor({
 
   const apply = useCallback(async () => {
     if (!bmp || busy) return;
-    if (isDefaultSettings(settings)) { onClose(); return; }
+    const plain = isDefaultSettings(settings);
+    if (plain && !done.length) { onClose(); return; }
     setBusy(true);
     setError('');
     // let the busy state paint before the main thread is taken for a second or two
     await new Promise((r) => setTimeout(r, 30));
+    let touchedBmp: ImageBitmap | null = null;
     try {
+      // Touch up first, at the cutout's own size, so nothing loses resolution;
+      // the other steps then work on the touched cutout.
+      let cut = bmp;
+      if (done.length) {
+        const t = renderTouchFull(bmp, fullBmp, !!prepared && !prepared.reason, done);
+        if (plain) {
+          const { blob } = await encode(t);
+          const base = file.name.replace(/\.[^.]+$/, '').replace(/-edit$/, '');
+          onApply(new File([blob], `${base}-edit.png`, { type: 'image/png' }), { touchOnly: true });
+          return;
+        }
+        cut = touchedBmp = await bitmapOf(t);
+      }
       // Sample the best photo there is: the full-resolution original when
       // this is a cutout of it (its mask goes on top), else the photo itself.
-      let src = bmp;
+      let src = cut;
       if (full) src = fullBmp || await decode(full);
       const natW = src.width, natH = src.height;
       // The result is sized from the full-resolution frame, long side up to 2000.
@@ -204,25 +262,26 @@ export default function PhotoEditor({
         // The cutout's refined mask (made at its own size, up to 2000px) goes
         // onto the full-resolution photo, smoothly scaled; then the edge
         // pixels take the rug's colour again, as they do in the cutout.
-        takeAlpha(work, bmp);
-        decontaminate(work.data, work.width, work.height, Math.max(4, Math.round((4 * work.width) / bmp.width)));
+        takeAlpha(work, cut);
+        decontaminate(work.data, work.width, work.height, Math.max(4, Math.round((4 * work.width) / cut.width)));
       }
       const pw = rescalePlan(p, natW, natH, work.width, work.height);
       const ss = Math.max(1, Math.min(3, Math.ceil(steps.max * (work.width / natW) - 0.25)));
       const out = applyTone(warp(work, pw, ss), settings.tone);
-      if (src !== bmp && src !== fullBmp) src.close();
+      if (src !== cut && src !== fullBmp) src.close();
       const { blob, type, ext } = await encode(out);
       const base = file.name.replace(/\.[^.]+$/, '').replace(/-edit$/, '');
-      onApply(new File([blob], `${base}-edit.${ext}`, { type }));
+      onApply(new File([blob], `${base}-edit.${ext}`, { type }), { touchOnly: false });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not apply the changes.');
       setBusy(false);
+    } finally {
+      touchedBmp?.close();
     }
-  }, [bmp, fullBmp, full, preview, busy, settings, frame, file.name, onApply, onClose]);
+  }, [bmp, fullBmp, full, preview, busy, settings, frame, file.name, onApply, onClose, done, prepared]);
 
   // Escape and Enter belong to the editor while it is open, not to the form
   // under it, and only while its tab is the visible one.
-  const tabActive = useTabActive();
   useEffect(() => {
     if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => {
@@ -241,13 +300,15 @@ export default function PhotoEditor({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [apply, busy, onClose, tabActive]);
 
-  const changed = !isDefaultSettings(settings);
+  const changed = !isDefaultSettings(settings) || done.length > 0;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-stretch justify-center bg-black/60 sm:items-center sm:p-6"
       role="dialog" aria-modal="true" aria-label="Edit photo" onClick={() => !busy && onClose()}>
       <div ref={dialog} tabIndex={-1} onClick={(e) => e.stopPropagation()}
-        className="flex max-h-full w-full max-w-[1100px] flex-col overflow-hidden bg-white outline-none sm:rounded-md sm:shadow-xl">
+        className={'flex max-h-full w-full max-w-[1100px] flex-col overflow-hidden bg-white outline-none sm:rounded-md sm:shadow-xl ' +
+          // painting wants all the room there is
+          (tool === 'touch' ? 'h-full sm:h-[92vh]' : '')}>
         <div className="flex items-center gap-4 border-b border-neutral-100 px-5 py-4">
           <h2 className="font-serif text-[21px]">Edit photo</h2>
           <span className="hidden truncate text-[12px] text-neutral-400 sm:block">{file.name}</span>
@@ -259,16 +320,27 @@ export default function PhotoEditor({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <Stage px={shown} tool={comparing ? null : tool} settings={settings} start={start}
-            onQuad={(quad) => set({ quad })} onCrop={(crop) => set({ crop })} />
+          {tool === 'touch' ? (
+            prepared ? (
+              <TouchCanvas prepared={prepared} strokes={done} mode={touch.mode} smart={touch.state.smart}
+                size={touch.state.size} comparing={comparing} disabled={busy} onStroke={touch.onStroke} />
+            ) : (
+              <div className="grid min-h-[280px] flex-1 place-items-center bg-neutral-100 text-[13px] text-neutral-500 sm:min-h-[420px]">
+                <span className="flex items-center gap-2"><Spinner /> Opening the original photo</span>
+              </div>
+            )
+          ) : (
+            <Stage px={shown} tool={comparing ? null : tool} settings={settings} start={start}
+              onQuad={(quad) => set({ quad })} onCrop={(crop) => set({ crop })} />
+          )}
 
           <div className="flex shrink-0 flex-col border-t border-neutral-100 md:w-[300px] md:border-l md:border-t-0">
-            <div role="tablist" aria-label="Tools" className="flex border-b border-neutral-100">
-              {TOOLS.map((t) => (
+            <div role="tablist" aria-label="Tools" className="flex overflow-x-auto border-b border-neutral-100">
+              {tools.map((t) => (
                 <button key={t.id} type="button" role="tab" aria-selected={tool === t.id}
                   onClick={() => setTool(t.id)}
                   className={
-                    'flex-1 whitespace-nowrap border-b-[1.5px] px-0.5 py-3 text-[12.5px] transition-colors ' +
+                    'min-h-[44px] flex-1 whitespace-nowrap border-b-[1.5px] px-[3px] py-3 text-[12px] transition-colors ' +
                     (tool === t.id
                       ? 'border-[#2F4C69] font-semibold text-neutral-900'
                       : 'border-transparent text-neutral-400 hover:text-neutral-700')
@@ -279,6 +351,11 @@ export default function PhotoEditor({
             </div>
 
             <div className="max-h-[38vh] overflow-y-auto px-5 py-4 md:max-h-none md:flex-1">
+              {tool === 'touch' && prepared && (
+                <TouchPanel state={{ ...touch.state, mode: touch.mode }} onChange={touch.setState} reason={touch.reason}
+                  fullLong={prepared.fullLong} disabled={busy} />
+              )}
+
               {tool === 'skew' && (
                 <div className="space-y-3 text-[12.5px] text-neutral-500">
                   <p>Drag the four corners onto the corners of the rug. Apply squares it up.</p>
@@ -360,7 +437,10 @@ export default function PhotoEditor({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-neutral-100 px-5 py-3.5">
-          <button type="button" onClick={() => { setSettings({ ...DEFAULT_SETTINGS, tone: NEUTRAL_TONE }); setAutoNote(''); }}
+          <button type="button" onClick={() => {
+            setSettings({ ...DEFAULT_SETTINGS, tone: NEUTRAL_TONE }); setAutoNote('');
+            touch.setState((s) => ({ ...s, history: EMPTY_HISTORY }));
+          }}
             disabled={!changed || busy} className="text-[13px] text-neutral-500 hover:text-neutral-900 disabled:opacity-40">
             Reset
           </button>
@@ -382,7 +462,7 @@ export default function PhotoEditor({
           </button>
           {busy && (
             <span role="status" className="text-[12px] text-neutral-500">
-              {slow ? 'Still working, large photo' : 'Applying at full size'}
+              {slow ? 'Still working, large photo' : done.length && isDefaultSettings(settings) ? 'Applying touch up' : 'Applying at full size'}
             </span>
           )}
           <button type="button" onClick={apply} disabled={!bmp || busy}
