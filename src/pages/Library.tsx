@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useInfiniteQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { Search, Check, X, Plus, Copy, Pencil, Trash2, RotateCw } from 'lucide-react';
+import { Search, Check, X, Plus, Copy, Pencil, Trash2, RotateCw, SlidersHorizontal } from 'lucide-react';
 import { type ShowroomProduct } from '../lib/firebase';
 import {
   getLibraryProducts,
@@ -25,7 +25,7 @@ import type { SlideLayout } from '../lib/deckSlots';
 import { EditProduct } from '../components/EditProduct';
 import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
-import { CutoutButton, CutoutWorking, CutoutBar, CutoutTouch, TouchUpButton } from '../components/PhotoCutout';
+import { CutoutButton, CutoutWorking, CutoutBar, CutoutTouch, TouchUpButton, EditPhotoButton, CutoutEdit } from '../components/PhotoCutout';
 import { useCutout, ROUND_BUTTON } from '../lib/useCutout';
 import { useTabActive } from '../lib/tabContext';
 import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
@@ -57,6 +57,8 @@ export function Library() {
   const [build, setBuild] = useState('');
   const [needsPhotos, setNeedsPhotos] = useState(false);
   const [open, setOpen] = useState<ShowroomProduct | null>(null);
+  /** Opened from a card's Edit photo: the preview opens straight into the photo editor. */
+  const [editOnOpen, setEditOnOpen] = useState(false);
   // null: closed. An object: open, prefilled from it (empty for a fresh design).
   const [creating, setCreating] = useState<NewProductInitial | null>(null);
   // The design a new colour variant is being added to.
@@ -303,7 +305,8 @@ export function Library() {
                   product={p}
                   selected={tray.has(p.id)}
                   onToggle={() => tray.toggle(p)}
-                  onOpen={() => setOpen(p)}
+                  onOpen={() => { setEditOnOpen(false); setOpen(p); }}
+                  onEditPhoto={() => { setEditOnOpen(true); setOpen(p); }}
                   onEdit={() => setEditing(p)}
                   onRotated={afterRotate}
                   onDelete={async () => { await deleteProduct(p); afterDelete(p); }}
@@ -322,7 +325,9 @@ export function Library() {
       <Tray onDone={(id) => navigate(`/links?new=${id}`)} onRotated={afterRotate} />
       {open && (
         <Detail
+          key={open.id}
           product={open}
+          editOnOpen={editOnOpen}
           onClose={() => setOpen(null)}
           // Only the preview still open on that record is updated: a save that
           // finishes after the dialog closed must not open it again.
@@ -446,9 +451,9 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 }
 
 function Card({
-  product, selected, onToggle, onOpen, onEdit, onDelete, onRotated,
+  product, selected, onToggle, onOpen, onEditPhoto, onEdit, onDelete, onRotated,
 }: {
-  product: ShowroomProduct; selected: boolean; onToggle: () => void; onOpen: () => void;
+  product: ShowroomProduct; selected: boolean; onToggle: () => void; onOpen: () => void; onEditPhoto: () => void;
   onEdit: () => void; onDelete: () => Promise<void>; onRotated: (p: ShowroomProduct) => void;
 }) {
   const hasPhoto = !!product.firebaseUrl;
@@ -512,8 +517,15 @@ function Card({
             <RotateButton onClick={turn.rotate} busy={turn.busy} label="Turn the main photo 90° clockwise"
               className={iconCls + ' text-neutral-600 hover:text-[#2F4C69] disabled:text-[#2F4C69]'} />
           )}
+          {hasPhoto && (
+            <button onClick={(e) => { e.stopPropagation(); onEditPhoto(); }}
+              aria-label={`Edit the main photo of ${product.displayName}`} title="Edit photo: skew, crop, colour, brightness"
+              className={iconCls + ' text-neutral-600 hover:text-[#2F4C69]'}>
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button onClick={(e) => { e.stopPropagation(); onEdit(); }}
-            aria-label={`Edit ${product.displayName}`} title="Edit"
+            aria-label={`Edit ${product.displayName}`} title="Edit design details"
             className={iconCls + ' text-neutral-600 hover:text-[#2F4C69]'}>
             <Pencil className="h-3.5 w-3.5" />
           </button>
@@ -573,8 +585,8 @@ function Card({
   );
 }
 
-function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, onDeleted, onOpenVariant, onAddVariant }: {
-  product: ShowroomProduct; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
+function Detail({ product, editOnOpen, onClose, onChanged, onLayoutSaved, onCopy, onEdit, onDeleted, onOpenVariant, onAddVariant }: {
+  product: ShowroomProduct; editOnOpen?: boolean; onClose: () => void; onChanged?: (p: ShowroomProduct) => void;
   onLayoutSaved?: (id: string, layout: SlideLayout | undefined) => void;
   onCopy?: (p: ShowroomProduct) => void;
   onOpenVariant?: (p: ShowroomProduct) => void;
@@ -604,6 +616,13 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
     shotAt.current = at;
     onChanged?.(p);
   });
+  // A card's Edit photo opens the preview straight into the editor, once.
+  const editStarted = useRef(false);
+  useEffect(() => {
+    if (!editOnOpen || editStarted.current) return;
+    editStarted.current = true;
+    void cut.edit();
+  }, [editOnOpen, cut]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -678,6 +697,7 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
                       label="Turn this photo 90° clockwise" className={ROUND_BUTTON + ' [&_svg]:h-4 [&_svg]:w-4'} />
                     <CutoutButton cut={cut} disabled={turn.pendingTurn} />
                     <TouchUpButton cut={cut} disabled={turn.pendingTurn} />
+                    <EditPhotoButton cut={cut} disabled={turn.pendingTurn} />
                   </div>
                   <CutoutWorking cut={cut} />
                   {turn.error && (
@@ -690,8 +710,10 @@ function Detail({ product, onClose, onChanged, onLayoutSaved, onCopy, onEdit, on
             </div>
             <CutoutBar cut={cut} />
             <CutoutTouch cut={cut} />
+            <CutoutEdit cut={cut} />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <PhotoOrder product={product} photos={gallery} shot={shot} onShot={setShot}
+                onEdit={(u) => { setShot(u); void cut.edit(u); }}
                 onSaved={(p) => onChanged?.(p)} />
               <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
             </div>

@@ -22,13 +22,28 @@ import { keepCutoutPhoto, restoreOriginalPhoto } from './productEdit';
 
 export type CutoutApi = ReturnType<typeof useCutout>;
 
+/** A stored photo as a File, from the best copy there is. */
+async function get(u: string): Promise<File> {
+  const res = await fetch(fixStorageUrl(u)).catch(() => { throw new Error('Could not load the photo. Check the connection.'); });
+  if (!res.ok) throw new Error(`Could not load the photo (${res.status}).`);
+  const blob = await res.blob();
+  const name = decodeURIComponent(new URL(u).pathname.split('/').pop() || 'photo').split('/').pop() || 'photo';
+  return new File([blob], name, { type: blob.type });
+}
+
 type Result = {
   file: File; preview: string; warning: string | null;
   /** The photo it was cut from, for Touch up's Bring back. */
   source: File | null;
+  /** It is still a direct cut of `source` (same framing), so Touch up can bring back from it. */
+  direct: boolean;
   /** Touch up was applied to it. */
   touched?: boolean;
+  /** The photo editor (skew, crop, tone and the rest) changed it. */
+  edited?: boolean;
 };
+/** What the photo editor opens on. `full` only when the photo is a direct cutout of it. */
+export type EditJob = { url: string; file: File; full?: File; cameraFrame: boolean; hasOriginal: boolean; source: File | null };
 /** What Touch up opens on: the cutout and the photo it was cut from. */
 export type TouchJob = { cut: File; original: File | null; direct: boolean };
 
@@ -41,6 +56,8 @@ export function useCutout(
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
   const [touching, setTouching] = useState<TouchJob | null>(null);
+  const [editing, setEditing] = useState<EditJob | null>(null);
+  const editGen = useRef(0);
   const gen = useRef(0);
   const mounted = useRef(true);
   const resultRef = useRef<Result | null>(null);
@@ -95,7 +112,7 @@ export function useCutout(
         performance.measure('libcut:remove', { start: t1, end: t2 });
       } catch { /* older browsers */ }
       if (!live()) return;
-      setResult({ file: cut.file, preview: URL.createObjectURL(cut.file), warning: cut.warning, source: file });
+      setResult({ file: cut.file, preview: URL.createObjectURL(cut.file), warning: cut.warning, source: file, direct: true });
       setJob(null);
     } catch (e) {
       if (!live()) return;
@@ -150,19 +167,12 @@ export function useCutout(
    */
   async function touch() {
     if (busy) return;
-    if (result) { setTouching({ cut: result.file, original: result.source, direct: true }); return; }
+    if (result) { setTouching({ cut: result.file, original: result.source, direct: result.direct }); return; }
     if (!original || !url) return;
     const mine = gen.current;
     setError(null);
     setJob({ label: 'Getting the photo' });
     try {
-      const get = async (u: string) => {
-        const res = await fetch(fixStorageUrl(u)).catch(() => { throw new Error('Could not load the photo. Check the connection.'); });
-        if (!res.ok) throw new Error(`Could not load the photo (${res.status}).`);
-        const blob = await res.blob();
-        const name = decodeURIComponent(new URL(u).pathname.split('/').pop() || 'photo').split('/').pop() || 'photo';
-        return new File([blob], name, { type: blob.type });
-      };
       const { normaliseImage } = await import('./imageIntake');
       const [cutFile, origFile] = await Promise.all([get(url), get(original).then(normaliseImage)]);
       if (mine !== gen.current) return;
@@ -180,10 +190,70 @@ export function useCutout(
     setTouching(null);
     if (!t) return;
     if (resultRef.current) URL.revokeObjectURL(resultRef.current.preview);
-    setResult({ file, preview: URL.createObjectURL(file), warning: null, source: t.original, touched: true });
+    setResult({ file, preview: URL.createObjectURL(file), warning: null, source: t.original, direct: t.direct, touched: true });
   }
 
-  return { run, undo, keep, restore, busy, job, result, error, original, touching, touch, touchDone, closeTouch: () => setTouching(null) };
+  /**
+   * The photo editor (touch up, skew, straighten, crop, size, tone) on the
+   * photo shown, or on the change on show that is not kept yet. `target` is
+   * the photo to edit when it is being switched to at the same moment (a
+   * thumbnail's Edit photo). The edited file becomes the change on show, and
+   * Keep saves it in place with the photo it replaced on record, so Restore
+   * original undoes it.
+   */
+  async function edit(target?: string) {
+    if (busy) return;
+    const r = resultRef.current;
+    if (r && !target) {
+      setEditing({ url, file: r.file, full: r.direct && r.source ? r.source : undefined, cameraFrame: r.direct, hasOriginal: !!r.source, source: r.source });
+      return;
+    }
+    const at = target || url;
+    if (!at) return;
+    const mine = ++editGen.current;
+    setError(null);
+    setJob({ label: 'Getting the photo' });
+    try {
+      const { normaliseImage } = await import('./imageIntake');
+      const file = await normaliseImage(await get(at));
+      const origUrl = originalOf(product.photoOriginals, at);
+      let full: File | undefined;
+      let source: File | null = null;
+      if (origUrl) {
+        source = await normaliseImage(await get(origUrl)).catch(() => null);
+        if (source) {
+          const { isDirectCut } = await import('./touchUpGlue');
+          if (await isDirectCut(file, source).catch(() => false)) full = source;
+        }
+      }
+      if (mine !== editGen.current || !mounted.current) return;
+      setJob(null);
+      setEditing({ url: at, file, full, cameraFrame: !origUrl || !!full, hasOriginal: !!source, source });
+    } catch (e) {
+      if (mine !== editGen.current || !mounted.current) return;
+      setJob(null);
+      setError({ message: e instanceof Error ? e.message : 'Could not open the photo.', retry: () => void edit(at) });
+    }
+  }
+
+  function editDone(file: File, info: { touchOnly: boolean }) {
+    const e = editing;
+    setEditing(null);
+    if (!e || e.url !== url) return;
+    if (resultRef.current) URL.revokeObjectURL(resultRef.current.preview);
+    setResult({
+      file, preview: URL.createObjectURL(file), warning: null, source: e.source,
+      direct: info.touchOnly && !!e.full, touched: info.touchOnly, edited: !info.touchOnly,
+    });
+  }
+
+  return {
+    run, undo, keep, restore, busy, job, result, error, original,
+    /** The photo shown is a PNG, so a cutout (Touch up only makes sense on one). */
+    isPng: /\.png$/i.test(decodeURIComponent(url.split('?')[0] || '')),
+    touching, touch, touchDone, closeTouch: () => setTouching(null),
+    editing, edit, editDone, closeEdit: () => { editGen.current += 1; setEditing(null); },
+  };
 }
 
 /** The round buttons on the big photo in the preview (rotate, remove background): 44px targets. */

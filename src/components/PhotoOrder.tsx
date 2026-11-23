@@ -28,13 +28,15 @@ function move<T>(list: T[], from: number, to: number): T[] {
  * Saves straight away.
  */
 export function PhotoOrder({
-  product, photos, shot, onShot, onSaved,
+  product, photos, shot, onShot, onSaved, onEdit,
 }: {
   product: ShowroomProduct;
   photos: string[];
   shot: string;
   onShot: (url: string) => void;
   onSaved?: (p: ShowroomProduct) => void;
+  /** Open this photo in the photo editor. */
+  onEdit?: (url: string) => void;
 }) {
   // Local order so a drop shows at once; the saved product replaces it after.
   const [order, setOrder] = useState(photos);
@@ -147,6 +149,17 @@ export function PhotoOrder({
             <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
         </button>
+        {onEdit && (
+          <button type="button" onClick={() => onEdit(g)}
+            title="Edit this photo: skew, crop, colour, brightness"
+            aria-label={`Edit the ${ordinal(i).toLowerCase()} photo`}
+            className="absolute -left-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-[#2F4C69] text-white shadow ring-2 ring-white transition-opacity hover:bg-[#233a50] focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+            <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" aria-hidden>
+              <path d="M2 3.5h8M2 8.5h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <circle cx="4.5" cy="3.5" r="1.3" fill="currentColor" /><circle cx="7.5" cy="8.5" r="1.3" fill="currentColor" />
+            </svg>
+          </button>
+        )}
         </div>
       ))}
 
@@ -174,6 +187,15 @@ export function PhotoOrder({
           <div className="px-3 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-neutral-400">
             Now {ordinal(menu.index).toLowerCase()}
           </div>
+          {onEdit && (
+            <>
+              <button role="menuitem" onClick={() => { const g = order[menu.index]; setMenu(null); onEdit(g); }}
+                className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-[#2F4C69] hover:bg-neutral-100">
+                Edit photo
+              </button>
+              <div className="my-1 border-t border-neutral-100" />
+            </>
+          )}
           {order.map((_, to) => (
             <button
               key={to}

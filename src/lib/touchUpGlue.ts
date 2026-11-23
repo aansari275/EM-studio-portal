@@ -105,3 +105,23 @@ export function useTouchState(active: boolean, prepared: Prepared | null) {
   return { state, setState, mode, reason, onStroke };
 }
 
+
+/**
+ * Is `cut` a cutout made straight from `orig` (transparent, same framing,
+ * same pixels where solid)? Then the editor may sample the full-resolution
+ * original under the cutout's mask. Checked on small copies, so it is quick.
+ */
+export async function isDirectCut(cut: File, orig: File): Promise<boolean> {
+  const [c, o] = await Promise.all([createImageBitmap(cut, { premultiplyAlpha: 'none' }), createImageBitmap(orig)]);
+  try {
+    if (!alignment(c, o, true).ok) return false;
+    const small = pixelsOf(c, 500);
+    let clear = false;
+    for (let i = 3; i < small.data.length; i += 4) if (small.data[i] < 255) { clear = true; break; }
+    if (!clear) return false;
+    const m = contentMismatch(small, pixelsAt(o, small.width, small.height), 3);
+    return m !== null && m <= MISMATCH_LIMIT;
+  } finally {
+    c.close(); o.close();
+  }
+}
