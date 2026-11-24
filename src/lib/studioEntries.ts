@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, runTransaction,
-  serverTimestamp, Timestamp,
+  serverTimestamp, Timestamp, deleteField,
 } from 'firebase/firestore';
 import { ref, getDownloadURL } from 'firebase/storage';
 import { prepareUpload, uploadWithProgress, type UploadStatus } from './uploadPrep';
@@ -8,6 +8,7 @@ import { db, storage } from './firebase';
 import { currentUserEmail, type Actor } from './auth';
 import { getSavedCustomers } from './options';
 import { patchOnExit } from './exitSave';
+import { parseSlideLayout, type SlideLayout } from './deckSlots';
 
 /**
  * Custom Rugs and Sample Dispatch: photos filed by customer and date.
@@ -76,6 +77,8 @@ export interface StudioEntry extends EntryDetails {
   updatedBy: string;
   deleted: boolean;
   status: EntryStatus;
+  /** This entry's own photo boxes on its deck slide. Absent = the house layout (deckSlots.ts). */
+  slideLayout?: SlideLayout;
 }
 
 export interface Customer {
@@ -103,6 +106,7 @@ function mapEntry(kind: EntryKind, id: string, d: Record<string, unknown>): Stud
     updatedBy: String(d.updatedBy || ''),
     deleted: d.deleted === true,
     status: d.status === 'draft' ? 'draft' : 'saved', // no status = saved (before drafts existed)
+    slideLayout: parseSlideLayout(d.slideLayout),
   };
 }
 
@@ -213,13 +217,8 @@ export async function fetchPhoto(p: EntryPhoto): Promise<Blob> {
   return res.blob();
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** 2026-11-21 as 21 Nov 2026. */
-export function formatDate(d: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
-  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : d;
-}
+/** 2026-11-21 as 21 Nov 2026 (kept beside the entry deck helpers, which are unit tested). */
+export { formatDate } from './studioEntryDeck';
 
 // ─── Drafts and autosave ────────────────────────────────────────────────────
 
@@ -231,6 +230,8 @@ export function newEntryId(kind: EntryKind): string {
 /** Everything the dialog autosaves. */
 export interface EntryFields extends EntryDetails {
   photos: EntryPhoto[];
+  /** Absent = the house layout; written as no field at all. */
+  slideLayout?: SlideLayout;
 }
 
 const cleanPhotos = (photos: EntryPhoto[]) =>
@@ -255,6 +256,7 @@ export async function saveEntryFields(kind: EntryKind, id: string, f: EntryField
     date: f.date,
     note: f.note,
     photos: cleanPhotos(f.photos),
+    slideLayout: f.slideLayout || deleteField(),
     updatedAt: serverTimestamp(),
     updatedBy: by.email || 'studio',
     ...(create ? { ...draftCreation(by), createdAt: serverTimestamp() } : {}),
@@ -271,6 +273,7 @@ export function saveEntryFieldsOnExit(kind: EntryKind, id: string, f: EntryField
     date: f.date,
     note: f.note,
     photos: cleanPhotos(f.photos),
+    slideLayout: f.slideLayout, // undefined: in the mask, not in the body, so the field is removed
     updatedAt: now,
     updatedBy: by.email || 'studio',
     ...(create ? { ...draftCreation(by), createdAt: now } : {}),
@@ -284,6 +287,7 @@ export async function promoteEntry(kind: EntryKind, id: string, f: EntryFields, 
   await setDoc(entryRef(kind, id), {
     ...d,
     photos: cleanPhotos(f.photos),
+    slideLayout: f.slideLayout || deleteField(),
     status: 'saved',
     deleted: false,
     updatedAt: serverTimestamp(),

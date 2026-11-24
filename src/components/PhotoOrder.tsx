@@ -20,12 +20,9 @@ function move<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * The thumbnail strip in the design preview, with the order editable in place:
- * drag a thumbnail onto another to put it there, or right-click it and choose
- * its position. Every thumbnail shows its position (Main, 2nd, 3rd...), and
- * that is the order decks and buyer links use. The red cross takes a photo
- * off the design (the file stays in Storage, so Undo can put it back).
- * Saves straight away.
+ * The thumbnail strip in the design preview, with the order editable in place.
+ * Saves straight away through reorderPhotos(). The strip itself is PhotoStrip,
+ * which Custom Rugs and Sample Dispatch entries use too.
  */
 export function PhotoOrder({
   product, photos, shot, onShot, onSaved, onEdit,
@@ -38,6 +35,41 @@ export function PhotoOrder({
   /** Open this photo in the photo editor. */
   onEdit?: (url: string) => void;
 }) {
+  const save = async (next: string[]) => {
+    const saved = await reorderPhotos(product, next);
+    onSaved?.(saved);
+  };
+  return <PhotoStrip photos={photos} shot={shot} onShot={onShot} save={save} onEdit={onEdit} />;
+}
+
+/**
+ * A strip of thumbnails whose order is the photo order: drag a thumbnail onto
+ * another to put it there, or right-click it (or press the context menu key,
+ * or with `menuOnSecondTap` tap the photo shown again) and choose its
+ * position. Every thumbnail shows its position (Main, 2nd, 3rd...), and that
+ * is the order decks and buyer links use. The red cross takes a photo off
+ * (the caller keeps the file, so Undo can put it back).
+ *
+ * `save` gets the whole new list. It may write at once (the Library) or just
+ * update state that an autosave writes (entries, with `quiet`, because the
+ * dialog shows its own save status).
+ */
+export function PhotoStrip({
+  photos, shot, onShot, save, onEdit, quiet, minPhotos = 0, menuOnSecondTap,
+}: {
+  photos: string[];
+  shot: string;
+  onShot: (url: string) => void;
+  save: (next: string[]) => Promise<void> | void;
+  /** Open this photo in the photo editor. */
+  onEdit?: (url: string) => void;
+  /** No Saving / Saved line of its own. */
+  quiet?: boolean;
+  /** The red cross is hidden when only this many photos are left. */
+  minPhotos?: number;
+  /** Tapping the photo already shown opens the position menu (touch screens have no right-click). */
+  menuOnSecondTap?: boolean;
+}) {
   // Local order so a drop shows at once; the saved product replaces it after.
   const [order, setOrder] = useState(photos);
   useEffect(() => setOrder(photos), [photos.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -48,6 +80,11 @@ export function PhotoOrder({
   // The list before the last removal, so Undo can restore it.
   const [undo, setUndo] = useState<string[] | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Keyboard users land in the menu (it opens from the context menu key too).
+  useEffect(() => {
+    if (menu) menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
+  }, [menu]);
 
   useEffect(() => {
     if (!menu) return;
@@ -67,19 +104,19 @@ export function PhotoOrder({
     };
   }, [menu]);
 
-  async function save(next: string[]): Promise<boolean> {
+  async function commit(next: string[]): Promise<boolean> {
     const before = order;
     setOrder(next);
-    setStatus('saving');
+    if (!quiet) setStatus('saving');
     try {
-      const saved = await reorderPhotos(product, next);
+      await save(next);
+      if (quiet) return true;
       setStatus('saved');
-      onSaved?.(saved);
       setTimeout(() => setStatus((s) => (s === 'saved' ? '' : s)), 2000);
       return true;
     } catch {
       setOrder(before);
-      setStatus('error');
+      if (!quiet) setStatus('error');
       return false;
     }
   }
@@ -88,20 +125,20 @@ export function PhotoOrder({
     setMenu(null);
     if (from === to) return;
     setUndo(null);
-    save(move(order, from, to));
+    void commit(move(order, from, to));
   }
 
   async function remove(i: number) {
     setMenu(null);
     const before = order;
-    if (await save(order.filter((_, j) => j !== i))) setUndo(before);
+    if (await commit(order.filter((_, j) => j !== i))) setUndo(before);
   }
 
   async function restore() {
     if (!undo) return;
     const list = undo;
     setUndo(null);
-    await save(list);
+    await commit(list);
   }
 
   return (
@@ -110,10 +147,20 @@ export function PhotoOrder({
         <div key={g} className="group relative shrink-0">
         <button
           draggable
-          onClick={() => onShot(g)}
+          onClick={(e) => {
+            if (menuOnSecondTap && g === shot) {
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenu({ index: i, x: r.left, y: r.bottom + 4 });
+              return;
+            }
+            onShot(g);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
-            setMenu({ index: i, x: e.clientX, y: e.clientY });
+            // The context menu key gives no pointer position: open under the thumbnail.
+            const r = e.currentTarget.getBoundingClientRect();
+            const atPointer = e.clientX || e.clientY;
+            setMenu({ index: i, x: atPointer ? e.clientX : r.left, y: atPointer ? e.clientY : r.bottom + 4 });
           }}
           onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = 'move'; }}
           onDragOver={(e) => { if (dragFrom !== null) { e.preventDefault(); setDragOver(i); } }}
@@ -122,6 +169,7 @@ export function PhotoOrder({
           onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
           title={`${ordinal(i)} photo. Drag to reorder, or right-click to choose its place.`}
           aria-label={`${ordinal(i)} photo`}
+          aria-haspopup="menu"
           className={
             'relative h-14 w-14 shrink-0 cursor-grab overflow-hidden rounded-sm active:cursor-grabbing ' +
             (dragOver === i && dragFrom !== i
@@ -138,7 +186,7 @@ export function PhotoOrder({
             {ordinal(i)}
           </span>
         </button>
-        <button
+        {order.length > minPhotos && <button
           type="button"
           onClick={() => remove(i)}
           title="Remove this photo"
@@ -148,7 +196,7 @@ export function PhotoOrder({
           <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" aria-hidden>
             <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
-        </button>
+        </button>}
         {onEdit && (
           <button type="button" onClick={() => onEdit(g)}
             title="Edit this photo: skew, crop, colour, brightness"
@@ -181,7 +229,7 @@ export function PhotoOrder({
           ref={menuRef}
           role="menu"
           aria-label="Photo position"
-          style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 80 - order.length * 32) }}
+          style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.max(8, Math.min(menu.y, window.innerHeight - 80 - order.length * 32)) }}
           className="fixed z-[60] max-h-[70vh] w-44 overflow-y-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
         >
           <div className="px-3 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-neutral-400">
@@ -190,7 +238,7 @@ export function PhotoOrder({
           {onEdit && (
             <>
               <button role="menuitem" onClick={() => { const g = order[menu.index]; setMenu(null); onEdit(g); }}
-                className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-[#2F4C69] hover:bg-neutral-100">
+                className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-[#2F4C69] hover:bg-neutral-100 [@media(pointer:coarse)]:min-h-[44px]">
                 Edit photo
               </button>
               <div className="my-1 border-t border-neutral-100" />
@@ -202,7 +250,7 @@ export function PhotoOrder({
               role="menuitem"
               disabled={to === menu.index}
               onClick={() => place(menu.index, to)}
-              className="block w-full px-3 py-1.5 text-left text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:text-neutral-300 disabled:hover:bg-transparent"
+              className="block w-full px-3 py-1.5 text-left text-[13px] text-neutral-800 hover:bg-neutral-100 disabled:text-neutral-300 disabled:hover:bg-transparent [@media(pointer:coarse)]:min-h-[44px]"
             >
               {to === 0 ? 'Make main photo' : `Make ${ordinal(to)}`}
             </button>
@@ -211,7 +259,7 @@ export function PhotoOrder({
           <button
             role="menuitem"
             onClick={() => remove(menu.index)}
-            className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-red-600 hover:bg-red-50"
+            className="block w-full px-3 py-1.5 text-left text-[13px] font-medium text-red-600 hover:bg-red-50 [@media(pointer:coarse)]:min-h-[44px]"
           >
             Remove photo
           </button>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { thumb } from '../lib/img';
 import {
   PHOTO_SLOTS, SLOT_HINTS, SLIDE_W, SLIDE_H, SPEC_BOX, LOGO_BOX,
@@ -23,10 +23,10 @@ const pctIn = (inner: Box, outer: Box) => ({
 });
 
 const CORNERS: Array<Corner & { name: string; cls: string; cursor: string }> = [
-  { sx: -1, sy: -1, name: 'top left', cls: '-left-2 -top-2', cursor: 'nwse-resize' },
-  { sx: 1, sy: -1, name: 'top right', cls: '-right-2 -top-2', cursor: 'nesw-resize' },
-  { sx: -1, sy: 1, name: 'bottom left', cls: '-bottom-2 -left-2', cursor: 'nesw-resize' },
-  { sx: 1, sy: 1, name: 'bottom right', cls: '-bottom-2 -right-2', cursor: 'nwse-resize' },
+  { sx: -1, sy: -1, name: 'top left', cls: '-left-2 -top-2 [@media(pointer:coarse)]:-left-[22px] [@media(pointer:coarse)]:-top-[22px]', cursor: 'nwse-resize' },
+  { sx: 1, sy: -1, name: 'top right', cls: '-right-2 -top-2 [@media(pointer:coarse)]:-right-[22px] [@media(pointer:coarse)]:-top-[22px]', cursor: 'nesw-resize' },
+  { sx: -1, sy: 1, name: 'bottom left', cls: '-bottom-2 -left-2 [@media(pointer:coarse)]:-bottom-[22px] [@media(pointer:coarse)]:-left-[22px]', cursor: 'nesw-resize' },
+  { sx: 1, sy: 1, name: 'bottom right', cls: '-bottom-2 -right-2 [@media(pointer:coarse)]:-bottom-[22px] [@media(pointer:coarse)]:-right-[22px]', cursor: 'nwse-resize' },
 ];
 
 /** Debounce before a change is written, per the house autosave rule. */
@@ -61,13 +61,10 @@ export function SlidePreview({
   /** Called with the saved layout (undefined = back to the house layout). */
   onLayoutSaved?: (id: string, layout: SlideLayout | undefined) => void;
 }) {
-  const extra = Math.max(0, photos.length - PHOTO_SLOTS.length);
   const [boxes, setBoxes] = useState<Box[]>(() => photoSlotsFor(product.slideLayout));
-  const [active, setActive] = useState<number | null>(null);
   const [status, setStatus] = useState<Status>('');
-  const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({});
-  const slideRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<Drag | null>(null);
+  // Set while a box is being dragged, so a fresh read does not move it away.
+  const dragging = useRef(false);
 
   // --- Saving: Firestore only, ~1.5 s after the last change, flushed on pagehide.
   const target = useRef(product);
@@ -125,12 +122,11 @@ export function SlidePreview({
   useEffect(() => {
     target.current = product;
     setBoxes(photoSlotsFor(product.slideLayout));
-    setActive(null);
     // The copy passed in can be older than the saved layout (the grid and the
     // colourway tiles are cached), so read the record's layout fresh.
     let live = true;
     withFreshSlideLayouts([product]).then(([fresh]) => {
-      if (!live || pending.current || drag.current) return;
+      if (!live || pending.current || dragging.current) return;
       target.current = { ...target.current, slideLayout: fresh.slideLayout };
       setBoxes(photoSlotsFor(fresh.slideLayout));
     });
@@ -156,18 +152,76 @@ export function SlidePreview({
     };
   }, [flush, flushOnExit]);
 
-  function change(i: number, box: Box, save = true) {
-    setBoxes((cur) => {
-      const next = cur.map((b, j) => (j === i ? box : b));
-      if (save) schedule(next);
-      return next;
-    });
+  const isColourway = !!product.baseStyleNumber && product.styleNumber !== product.baseStyleNumber;
+  const which = isColourway ? 'this colourway' : 'this design';
+
+  return (
+    <SlideBoxes
+      key={product.id}
+      photos={photos}
+      boxes={boxes}
+      onBoxes={setBoxes}
+      onCommit={schedule}
+      onDragging={(on) => { dragging.current = on; }}
+      onPick={onPick}
+      which={which}
+      status={
+        <span className={'ml-auto text-[11px] ' + (status === 'error' ? 'text-red-600' : 'text-neutral-400')} role="status" aria-live="polite">
+          {status === 'saving' || status === 'pending' ? 'Saving…' : status === 'saved' ? 'Saved' : status === 'error' ? (
+            <>Could not save. <button type="button" className="font-semibold underline" onClick={() => { void flush(); }}>Try again</button></>
+          ) : ''}
+        </span>
+      }
+    />
+  );
+}
+
+/**
+ * The slide diagram itself: boxes to move and resize, photos fitted as the
+ * deck fits them. Holds no layout of its own: `boxes` come from the caller,
+ * every change goes back through `onBoxes`, and `onCommit` is called with the
+ * boxes to save once a change is finished (end of a drag, an arrow key, Fit,
+ * Reset). Used by the Library preview (SlidePreview) and by Custom Rugs and
+ * Sample Dispatch entries, so both draw with the same geometry as the deck.
+ */
+export function SlideBoxes({
+  photos, boxes, onBoxes, onCommit, onDragging, onPick, which, status,
+  hint = 'Drag a box to move it, pull a corner to resize. Drag the thumbnails above to change which photo goes where.',
+}: {
+  photos: string[];
+  boxes: Box[];
+  onBoxes: (boxes: Box[]) => void;
+  onCommit: (boxes: Box[]) => void;
+  onDragging?: (on: boolean) => void;
+  onPick?: (url: string) => void;
+  /** "this design", "this entry": whose layout it is. */
+  which: string;
+  /** The save state, shown at the end of the action row. */
+  status?: ReactNode;
+  hint?: string;
+}) {
+  const extra = Math.max(0, photos.length - PHOTO_SLOTS.length);
+  const [active, setActive] = useState<number | null>(null);
+  const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({});
+  const slideRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<Drag | null>(null);
+  // The boxes as last drawn or dragged, so a drag's end commits its last move
+  // even before React has re-rendered it.
+  const latest = useRef(boxes);
+  useEffect(() => { latest.current = boxes; }, [boxes]);
+
+  function change(i: number, box: Box) {
+    const next = latest.current.map((b, j) => (j === i ? box : b));
+    latest.current = next;
+    onBoxes(next);
+    onCommit(next);
   }
 
   function reset() {
     const next = PHOTO_SLOTS.map((b) => ({ ...b }));
-    setBoxes(next);
-    schedule(next);
+    latest.current = next;
+    onBoxes(next);
+    onCommit(next);
   }
 
   function fitToPhoto(i: number) {
@@ -185,6 +239,7 @@ export function SlidePreview({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     (mode === 'move' ? (e.currentTarget as HTMLElement) : (e.currentTarget.parentElement as HTMLElement))?.focus({ preventScroll: true });
     setActive(i);
+    onDragging?.(true);
     drag.current = { i, mode, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, start: boxes[i], moved: false };
   }
 
@@ -212,18 +267,21 @@ export function SlidePreview({
         h: s.h + sy * dy,
       };
     }
-    setBoxes((cur) => cur.map((b, j) => (j === d.i ? constrainBox(next, b, d.mode) : b)));
+    const moved = latest.current.map((b, j) => (j === d.i ? constrainBox(next, b, d.mode) : b));
+    latest.current = moved;
+    onBoxes(moved);
   }
 
   function up(e: ReactPointerEvent) {
     const d = drag.current;
     if (!d || e.pointerId !== d.pointerId) return;
     drag.current = null;
+    onDragging?.(false);
     if (!d.moved) {
       if (d.mode === 'move' && photos[d.i]) onPick?.(photos[d.i]);
       return;
     }
-    setBoxes((cur) => { schedule(cur); return cur; });
+    onCommit(latest.current);
   }
 
   // --- Keyboard: arrows move a focused box, or a focused corner. Shift = bigger steps.
@@ -241,7 +299,7 @@ export function SlidePreview({
     if (!v) return;
     e.preventDefault();
     e.stopPropagation();
-    const b = boxes[i];
+    const b = latest.current[i];
     const [dx, dy] = [v[0] * step, v[1] * step];
     let next: Box;
     if (mode === 'move') next = { ...b, x: b.x + dx, y: b.y + dy };
@@ -255,8 +313,6 @@ export function SlidePreview({
   }
 
   const custom = !isDefaultSlots(boxes);
-  const isColourway = !!product.baseStyleNumber && product.styleNumber !== product.baseStyleNumber;
-  const which = isColourway ? 'this colourway' : 'this design';
   const activeUrl = active !== null ? photos[active] : undefined;
 
   return (
@@ -264,7 +320,7 @@ export function SlidePreview({
       <figcaption className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
         On the deck slide
         <span className="font-normal normal-case tracking-normal text-neutral-400">
-          Drag a box to move it, pull a corner to resize. Drag the thumbnails above to change which photo goes where.
+          {hint}
         </span>
       </figcaption>
       <div
@@ -352,7 +408,7 @@ export function SlidePreview({
                   onPointerCancel={up}
                   onKeyDown={(e) => key(e, i, c)}
                   onFocus={(e) => { e.stopPropagation(); setActive(i); }}
-                  className={'absolute grid h-4 w-4 touch-none place-items-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[#98671A] focus-visible:ring-offset-1 ' + c.cls}
+                  className={'absolute grid h-4 w-4 touch-none place-items-center [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[#98671A] focus-visible:ring-offset-1 ' + c.cls}
                   style={{ cursor: c.cursor }}
                 >
                   <span className="pointer-events-none block h-2.5 w-2.5 rounded-[2px] border border-white bg-[#2F4C69] shadow" />
@@ -380,11 +436,7 @@ export function SlidePreview({
           className="font-semibold text-[#2F4C69] underline-offset-2 hover:underline disabled:cursor-default disabled:text-neutral-300 disabled:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2F4C69]">
           Reset to default layout
         </button>
-        <span className={'ml-auto text-[11px] ' + (status === 'error' ? 'text-red-600' : 'text-neutral-400')} role="status" aria-live="polite">
-          {status === 'saving' || status === 'pending' ? 'Saving…' : status === 'saved' ? 'Saved' : status === 'error' ? (
-            <>Could not save. <button type="button" className="font-semibold underline" onClick={() => { void flush(); }}>Try again</button></>
-          ) : ''}
-        </span>
+        {status}
       </div>
 
       <ol className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-neutral-600 sm:grid-cols-4">

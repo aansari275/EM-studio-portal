@@ -63,7 +63,7 @@ let IMAGES: DeckImages | undefined;
  * Structure: 2 intro slides + product slides + 3 outro slides.
  */
 export function buildPptx(
-  products: ShowroomProduct[],
+  products: DeckRecord[],
   title: string = 'Eastern Mills',
   opts: DeckOptions = {}
 ): pptxgen {
@@ -117,7 +117,7 @@ export async function generateProductPPT(
 
 /** Build the deck in memory, so its real size is known before it is saved. */
 export async function buildPptxBlob(
-  products: ShowroomProduct[],
+  products: DeckRecord[],
   title: string,
   opts: DeckOptions
 ): Promise<Blob> {
@@ -175,8 +175,16 @@ function placeImage(
   return true;
 }
 
+/**
+ * A record for the deck. Library products are ShowroomProducts as they are.
+ * A Custom Rugs or Sample Dispatch entry (studioEntryDeck.ts) brings its own
+ * spec lines (customer, date, note) instead of style, colour and size.
+ */
+export type DeckRecord = ShowroomProduct & { deckSpec?: string[] };
+
 /** The spec lines in the house deck's own wording, skipping what a record lacks. */
-function specLines(product: ShowroomProduct): string[] {
+function specLines(product: DeckRecord): string[] {
+  if (product.deckSpec) return product.deckSpec;
   const style = (product.styleNumber || product.baseStyleNumber || '').trim();
   const lines: string[] = [];
   if (style) lines.push(`STYLE NO. – ${style}`);
@@ -188,15 +196,19 @@ function specLines(product: ShowroomProduct): string[] {
   return lines;
 }
 
-function addSpecBlock(slide: pptxgen.Slide, product: ShowroomProduct) {
+function addSpecBlock(slide: pptxgen.Slide, product: DeckRecord) {
   const lines = specLines(product);
   if (!lines.length) return;
+  // An entry's note is free text and can run long: smaller type so it stays in
+  // the box. Products keep the house 12pt exactly.
+  const chars = product.deckSpec ? lines.join(' ').length : 0;
+  const fontSize = chars > 300 ? 8 : chars > 200 ? 9 : chars > 130 ? 10.5 : 12;
   slide.addText(lines.join('\n'), {
     x: 10.593,
     y: 1.223,
     w: 2.74,
     h: 1.533,
-    fontSize: 12,
+    fontSize,
     fontFace: FONTS.main,
     color: COLORS.gray,
     valign: 'top',
@@ -250,7 +262,7 @@ function addColourwaySlide(pptx: pptxgen, products: ShowroomProduct[]) {
  * slide. Same spec block on the right so a buyer flicking through still knows
  * which rug they are looking at.
  */
-function addMorePhotoSlides(pptx: pptxgen, product: ShowroomProduct) {
+function addMorePhotoSlides(pptx: pptxgen, product: DeckRecord) {
   const more = orderedImages(product).slice(4).filter((u) => !IMAGES || IMAGES.has(u));
   for (let i = 0; i < more.length; i += GRID.length) {
     const slide = pptx.addSlide();
@@ -373,7 +385,7 @@ function addIntroSlide2(pptx: pptxgen) {
 /**
  * Product Slide - With logo ICON on all product slides
  */
-function addProductSlide(pptx: pptxgen, product: ShowroomProduct) {
+function addProductSlide(pptx: pptxgen, product: DeckRecord) {
   const slide = pptx.addSlide();
 
   // Geometry lifted straight from the house deck, "New Collection offer for

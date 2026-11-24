@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db, type ShowroomProduct } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { currentUserUid } from '../lib/auth';
 import { orderedImages } from '../lib/img';
 import { withFreshSlideLayouts } from '../lib/productEdit';
-import { buildPptxBlob, deckFileName, deckPhotoSlots, type DeckLayout } from '../lib/pptGenerator';
+import { buildPptxBlob, deckFileName, deckPhotoSlots, type DeckLayout, type DeckRecord } from '../lib/pptGenerator';
 import { loadDeckImages, FULL, EMAIL_STEPS, EMAIL_LIMIT, type Quality } from '../lib/deckImages';
 
 /**
@@ -49,10 +49,10 @@ function savePrefs(p: DeckPrefs) {
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
-function save(blob: Blob) {
+function save(blob: Blob, name = deckFileName()) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = deckFileName();
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -64,11 +64,31 @@ export default function PptDialog({
   title = 'Eastern Mills',
   onClose,
   onSaved,
+  heading,
+  fileName,
+  singleOnly,
+  freshen = withFreshSlideLayouts,
 }: {
-  products: ShowroomProduct[];
+  products: DeckRecord[];
   title?: string;
   onClose: () => void;
   onSaved?: () => void;
+  /** The dialog title. Default: PPT of N rugs. */
+  heading?: string;
+  /** The saved file's name. Default: Eastern_Mills_Gallery_<date>.pptx. */
+  fileName?: string;
+  /**
+   * One rug per slide only (a Custom Rugs or Sample Dispatch entry): no
+   * layout choice, and the Library's saved deck setup is neither applied
+   * to the layout nor overwritten.
+   */
+  singleOnly?: boolean;
+  /**
+   * Each record's latest slide layout before building. Library: re-read from
+   * Firestore (tray copies are snapshots). An entry passes its open dialog's
+   * state, which is newer than anything saved.
+   */
+  freshen?: (products: DeckRecord[]) => Promise<DeckRecord[]>;
 }) {
   const [layout, setLayout] = useState<DeckLayout>('single');
   const [extraPhotos, setExtraPhotos] = useState(true);
@@ -81,12 +101,12 @@ export default function PptDialog({
     loadPrefs()
       .then((p) => {
         if (!live || !p || touched.current) return;
-        if (p.layout) setLayout(p.layout);
+        if (p.layout && !singleOnly) setLayout(p.layout);
         if (p.extraPhotos !== undefined) setExtraPhotos(p.extraPhotos);
       })
       .catch(() => {});
     return () => { live = false; };
-  }, []);
+  }, [singleOnly]);
   const pickLayout = (l: DeckLayout) => { touched.current = true; setLayout(l); };
 
   const extra = useMemo(() => {
@@ -100,7 +120,7 @@ export default function PptDialog({
     setStep({ kind: 'working', label: 'Reading slide layouts' });
     // Each rug's own photo boxes, as saved now, not as they were when ticked.
     // Photos are fetched at the size of the box they land in.
-    const deckProducts = layout === 'single' ? await withFreshSlideLayouts(products) : products;
+    const deckProducts = layout === 'single' ? await freshen(products) : products;
     const slots = deckPhotoSlots(deckProducts, { layout, extraPhotos });
     setStep({ kind: 'working', label, done: 0, total: slots.length });
     const images = await loadDeckImages(slots, quality, (done, total) =>
@@ -120,10 +140,10 @@ export default function PptDialog({
 
   const buildFull = () =>
     run(async () => {
-      savePrefs({ layout, extraPhotos });
+      if (!singleOnly) savePrefs({ layout, extraPhotos });
       const blob = await build(FULL, 'Preparing photos');
       if (blob.size > EMAIL_LIMIT) return setStep({ kind: 'big', blob });
-      save(blob);
+      save(blob, fileName);
       setStep({ kind: 'saved', bytes: blob.size });
     });
 
@@ -134,7 +154,7 @@ export default function PptDialog({
         blob = await build(q, 'Making an email-friendly copy');
         if (blob.size <= EMAIL_LIMIT) break;
       }
-      save(blob!);
+      save(blob!, fileName);
       const over = blob!.size > EMAIL_LIMIT;
       setStep({
         kind: 'saved',
@@ -165,12 +185,12 @@ export default function PptDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="ppt-title" className="font-serif text-2xl">
-          PPT of {products.length} rug{products.length === 1 ? '' : 's'}
+          {heading || `PPT of ${products.length} rug${products.length === 1 ? '' : 's'}`}
         </h2>
 
         {step.kind === 'options' && (
           <>
-            <fieldset className="mt-5 space-y-2">
+            {!singleOnly && <fieldset className="mt-5 space-y-2">
               <legend className="mb-2 text-[12px] uppercase tracking-wider text-neutral-400">Layout</legend>
               <Choice
                 checked={layout === 'single'}
@@ -184,7 +204,7 @@ export default function PptDialog({
                 title="Eight rugs per slide"
                 hint="Colourway grid, colour and size under each"
               />
-            </fieldset>
+            </fieldset>}
 
             {layout === 'single' && extra.photos > 0 && (
               <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-sm border border-neutral-200 p-3 text-sm hover:border-neutral-400">
@@ -252,7 +272,7 @@ export default function PptDialog({
               </button>
               <button
                 onClick={() => {
-                  save(step.blob);
+                  save(step.blob, fileName);
                   setStep({ kind: 'saved', bytes: step.blob.size });
                             }}
                 className="rounded-sm border border-neutral-200 px-[18px] py-2.5 text-[13px] font-semibold hover:border-neutral-400"

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Trash2, X } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Download, Presentation, Trash2, X } from 'lucide-react';
 import { PhotoPicker, type Slot } from './PhotoPicker';
 import {
   fillSavedSlots, isSyncedSlot, needsUpload, placeholderSlots, savedPhotos,
@@ -17,8 +17,14 @@ import {
 } from '../lib/studioEntries';
 import { currentActor, type Actor } from '../lib/auth';
 import { saveZip, today } from '../lib/download';
-import { thumb } from '../lib/img';
 import { useTabActive, useUnsavedWork } from '../lib/tabContext';
+import { PhotoStrip } from './PhotoOrder';
+import { SlideBoxes } from './SlidePreview';
+import { photoSlotsFor, isDefaultSlots, toFrac, type Box, type SlideLayout } from '../lib/deckSlots';
+import { entryDeckFileName, entryDeckRecord, reorderBy } from '../lib/studioEntryDeck';
+
+// pptxgenjs is large: the deck dialog loads only when Download PPT is pressed.
+const PptDialog = lazy(() => import('./PptDialog'));
 
 /**
  * New entry, a draft being continued, or a saved entry. Everything autosaves
@@ -93,8 +99,19 @@ export function EntryDialog({
 
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const [viewing, setViewing] = useState(0);
+  const [shot, setShot] = useState('');
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [pptOpen, setPptOpen] = useState(false);
+
+  // This entry's own photo boxes on its deck slide, saved with the entry by
+  // the autosave below (no field = the house layout).
+  const [slideLayout, setSlideLayout] = useState<SlideLayout | undefined>(entry?.slideLayout);
+  const [boxes, setBoxes] = useState<Box[]>(() => photoSlotsFor(entry?.slideLayout));
+  const commitBoxes = useCallback((b: Box[]) => {
+    setSlideLayout(isDefaultSlots(b) ? undefined : {
+      v: 1, slots: b.map(toFrac), updatedAt: new Date().toISOString(), updatedBy: actor.email || 'studio',
+    });
+  }, [actor]);
 
   // ─── photos upload in the background ──────────────────────────────────
   const upload = useCallback<SyncUpload>((f, on) => uploadEntryPhoto(kind, id, f, on), [kind, id]);
@@ -118,7 +135,8 @@ export function EntryDialog({
     date,
     note,
     photos: [...photos, ...(savedPhotos(slots) as EntryPhoto[])],
-  }), [customer, date, note, photos, slots]);
+    ...(slideLayout ? { slideLayout } : {}),
+  }), [customer, date, note, photos, slots, slideLayout]);
   const hasContent = !!customer || !!note.trim() || slots.length > 0;
   const complete = !!customer && /^\d{4}-\d{2}-\d{2}$/.test(date);
   const value = mode === 'new' && !hasContent ? null : mode === 'saved' && !complete ? null : fields;
@@ -172,11 +190,11 @@ export function EntryDialog({
   const tabActive = useTabActive();
   useEffect(() => {
     if (!tabActive) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && requestClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !pptOpen && requestClose();
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
-  }, [requestClose, tabActive]);
+  }, [requestClose, tabActive, pptOpen]);
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -209,16 +227,6 @@ export function EntryDialog({
     });
   };
 
-  const removePhoto = (i: number) => setConfirm({
-    title: 'Remove this photo?',
-    message: 'It is taken off the entry. The file is kept in storage.',
-    confirmLabel: 'Remove photo', danger: true,
-    run: () => {
-      setPhotos((p) => p.filter((_, j) => j !== i));
-      setViewing((v) => Math.max(0, Math.min(v, photos.length - 2)));
-    },
-  });
-
   const downloadAll = () => run('Making the zip…', async () => {
     const files = await Promise.all(photos.map(async (p) => ({ name: p.name, blob: await fetchPhoto(p) })));
     const who = (customer?.name || 'photos').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
@@ -236,9 +244,62 @@ export function EntryDialog({
     }),
   });
 
-  const big = photos[viewing];
   const isSaved = mode === 'saved';
+
+  // ─── photo order (the strip) ──────────────────────────────────────────
+  // The order of the entry's photos is the deck order: 1 is main. A saved
+  // entry orders its photos list; a draft orders its tiles (the ones already
+  // uploaded; tiles still uploading stay at the end until they are saved).
+  const stash = useRef(new Map<string, unknown>());
+  const ordered = useMemo(() => (isSaved ? photos : (savedPhotos(slots) as EntryPhoto[])), [isSaved, photos, slots]);
+  const orderUrls = useMemo(() => ordered.map((p) => p.url), [ordered]);
+  const reorder = (next: string[]) => {
+    const shown = orderUrls;
+    if (isSaved) {
+      setPhotos((cur) => reorderBy(cur, (p) => p.url, next, shown, stash.current as Map<string, EntryPhoto>));
+    } else {
+      setSlots((cur) => reorderBy(cur, (s) => s.remote?.url, next, shown, stash.current as Map<string, Slot>));
+    }
+  };
+  const viewing = Math.max(0, photos.findIndex((p) => p.url === shot));
+  const big = photos[viewing];
+
+  // ─── Download PPT ─────────────────────────────────────────────────────
+  const working = slots.some((s) => s.working);
+  const pptBlocked = uploading > 0
+    ? `Waiting for ${uploading} photo${uploading > 1 ? 's' : ''} to upload.`
+    : working ? 'Waiting for the backgrounds to finish.'
+      : !fields.photos.length ? 'Add a photo to make a PPT.' : '';
+  const deck = useMemo(() => entryDeckRecord({ id, ...fields }), [id, fields]);
   const title = isSaved ? (customer?.name || entry!.customerName) : `${mode === 'draft' ? 'Draft' : 'New'} ${KIND_NOUN[kind]}`;
+
+  const pptButton = (
+    <button type="button" onClick={() => setPptOpen(true)} disabled={!!busy || !!pptBlocked}
+      aria-describedby={pptBlocked ? `ppt-why-${id}` : undefined}
+      className="flex min-h-[44px] items-center gap-1.5 text-[13px] text-neutral-500 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50">
+      <Presentation className="h-4 w-4" strokeWidth={1.8} /> Download PPT
+    </button>
+  );
+  const pptWhy = pptBlocked && (fields.photos.length > 0 || slots.length > 0) ? (
+    <p id={`ppt-why-${id}`} className="w-full text-[12px] text-[#98671A]">PPT: {pptBlocked}</p>
+  ) : null;
+
+  // One place for the order and the slide, for drafts and saved entries alike:
+  // the same strip and diagram as the Library preview.
+  const orderAndSlide = (
+    <>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <PhotoStrip photos={orderUrls} shot={isSaved ? (big?.url || '') : shot} onShot={setShot} save={reorder}
+          quiet minPhotos={isSaved ? 1 : 0} menuOnSecondTap />
+      </div>
+      <p className="mt-1.5 text-[11.5px] text-neutral-400">
+        Drag a photo onto another to change the order, or right-click it for Make main, Make 2nd. On a phone, tap a photo, then tap it again.
+        {!isSaved && slots.length > ordered.length && ' Photos still uploading join the order once they are saved.'}
+      </p>
+      <SlideBoxes photos={orderUrls} boxes={boxes} onBoxes={setBoxes} onCommit={commitBoxes} onPick={setShot}
+        which="this entry" hint="Drag a box to move it, pull a corner to resize." />
+    </>
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 sm:p-10"
@@ -263,36 +324,18 @@ export function EntryDialog({
                 {big && <img src={big.url} alt={`Photo ${viewing + 1} of ${photos.length}`} className="max-h-full max-w-full object-contain" />}
                 {photos.length > 1 && (
                   <>
-                    <button type="button" aria-label="Previous photo" onClick={() => setViewing((v) => (v - 1 + photos.length) % photos.length)}
+                    <button type="button" aria-label="Previous photo" onClick={() => setShot(photos[(viewing - 1 + photos.length) % photos.length].url)}
                       className="absolute left-2 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-neutral-700 shadow hover:text-neutral-900">
                       <ChevronLeft className="h-5 w-5" />
                     </button>
-                    <button type="button" aria-label="Next photo" onClick={() => setViewing((v) => (v + 1) % photos.length)}
+                    <button type="button" aria-label="Next photo" onClick={() => setShot(photos[(viewing + 1) % photos.length].url)}
                       className="absolute right-2 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-neutral-700 shadow hover:text-neutral-900">
                       <ChevronRight className="h-5 w-5" />
                     </button>
                   </>
                 )}
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {photos.map((p, i) => (
-                  <div key={p.path || p.url} className="group relative">
-                    <button type="button" onClick={() => setViewing(i)} aria-label={`Show photo ${i + 1}`}
-                      aria-current={i === viewing}
-                      className={'block h-16 w-16 overflow-hidden rounded-sm bg-neutral-50 ' +
-                        (i === viewing ? 'shadow-[0_0_0_2px_#2F4C69]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]')}>
-                      <img src={thumb(p.url, 160)} alt="" loading="lazy" className="h-full w-full object-contain" />
-                    </button>
-                    {photos.length > 1 && (
-                      <button type="button" onClick={() => removePhoto(i)} disabled={!!busy}
-                        aria-label={`Remove photo ${i + 1}`}
-                        className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white text-neutral-600 opacity-0 shadow transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                        <X className="h-3 w-3" strokeWidth={2.5} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
+              {orderAndSlide}
             </div>
           )}
 
@@ -322,6 +365,13 @@ export function EntryDialog({
             </div>
           </div>
 
+          {!isSaved && ordered.length > 0 && (
+            <div>
+              <Label>Order on the deck</Label>
+              {orderAndSlide}
+            </div>
+          )}
+
           {isSaved && !complete && (
             <p className="text-[12.5px] text-[#98671A]">Choose a customer and a date to save these changes.</p>
           )}
@@ -329,6 +379,7 @@ export function EntryDialog({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-neutral-100 px-6 py-4">
+          {pptWhy}
           {!isSaved ? (
             <>
               <p className="min-w-0 flex-1 text-[12.5px] text-neutral-400">
@@ -337,9 +388,10 @@ export function EntryDialog({
                   : 'Nothing is saved until you add something.')}
               </p>
               <button onClick={discard} disabled={!!busy}
-                className="text-[13px] text-neutral-500 hover:text-red-700">
+                className="min-h-[44px] text-[13px] text-neutral-500 hover:text-red-700">
                 {created ? 'Discard draft' : 'Cancel'}
               </button>
+              {pptButton}
               <button onClick={promote} disabled={!!busy || uploading > 0 || slots.some((s) => s.working)}
                 className="rounded-sm bg-[#2F4C69] px-[18px] py-2.5 text-[13px] font-semibold text-white disabled:opacity-60">
                 {busy || 'Save entry'}
@@ -355,6 +407,7 @@ export function EntryDialog({
                 className="flex items-center gap-1.5 text-[13px] text-neutral-500 hover:text-neutral-900">
                 <Download className="h-4 w-4" strokeWidth={1.8} /> Download all
               </button>
+              {pptButton}
               <div className="flex-1" />
               {busy && <span className="text-[12.5px] text-neutral-400">{busy}</span>}
               <button onClick={requestClose} disabled={!!busy}
@@ -365,6 +418,23 @@ export function EntryDialog({
           )}
         </div>
       </div>
+
+      {pptOpen && (
+        // Clicks inside must not reach the entry's backdrop (which closes the entry).
+        <div onClick={(e) => e.stopPropagation()}>
+          <Suspense fallback={null}>
+            <PptDialog
+              products={[deck]}
+              title={fields.customerName || 'Eastern Mills'}
+              heading={`PPT of this ${KIND_NOUN[kind]}`}
+              fileName={entryDeckFileName(fields)}
+              singleOnly
+              freshen={async (p) => p}
+              onClose={() => setPptOpen(false)}
+            />
+          </Suspense>
+        </div>
+      )}
 
       {confirm && (
         <ConfirmDialog

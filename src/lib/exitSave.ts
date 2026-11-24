@@ -40,7 +40,9 @@ export function toRestValue(v: unknown): RestValue {
 
 /**
  * PATCHes the named fields of one document with keepalive. `mustExist` stops
- * it creating a document that was never there. Fire and forget.
+ * it creating a document that was never there. Fire and forget. A field whose
+ * value is `undefined` is in the update mask but not in the body, which
+ * removes it from the document (as deleteField() does).
  */
 export function patchOnExit(docPath: string, fields: Record<string, unknown>, mustExist = true): void {
   const { apiKey, projectId } = db.app.options;
@@ -48,7 +50,7 @@ export function patchOnExit(docPath: string, fields: Record<string, unknown>, mu
   const mask = keys.map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
   const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${docPath}`
     + `?${mask}${mustExist ? '&currentDocument.exists=true' : ''}&key=${apiKey}`;
-  const body = { fields: Object.fromEntries(keys.map((k) => [k, toRestValue(fields[k])])) };
+  const body = { fields: Object.fromEntries(keys.filter((k) => fields[k] !== undefined).map((k) => [k, toRestValue(fields[k])])) };
   try {
     void fetch(url, {
       method: 'PATCH',
