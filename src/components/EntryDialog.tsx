@@ -382,7 +382,7 @@ export function EntryDialog({
           {pptWhy}
           {!isSaved ? (
             <>
-              <p className="min-w-0 flex-1 text-[12.5px] text-neutral-400">
+              <p className="min-w-0 basis-full text-[12.5px] text-neutral-400 sm:basis-auto sm:flex-1">
                 {busy || (created
                   ? 'Saved as draft. Close any time and carry on from Drafts.'
                   : 'Nothing is saved until you add something.')}

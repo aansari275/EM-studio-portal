@@ -162,12 +162,20 @@ export function PhotoStrip({
             const atPointer = e.clientX || e.clientY;
             setMenu({ index: i, x: atPointer ? e.clientX : r.left, y: atPointer ? e.clientY : r.bottom + 4 });
           }}
+          onKeyDown={(e) => {
+            // Shift+F10 or the context menu key (a Mac sends no contextmenu event for either).
+            if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenu({ index: i, x: r.left, y: r.bottom + 4 });
+            }
+          }}
           onDragStart={(e) => { setDragFrom(i); e.dataTransfer.effectAllowed = 'move'; }}
           onDragOver={(e) => { if (dragFrom !== null) { e.preventDefault(); setDragOver(i); } }}
           onDragLeave={() => setDragOver((o) => (o === i ? null : o))}
           onDrop={(e) => { e.preventDefault(); if (dragFrom !== null) place(dragFrom, i); setDragFrom(null); setDragOver(null); }}
           onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
-          title={`${ordinal(i)} photo. Drag to reorder, or right-click to choose its place.`}
+          title={`${ordinal(i)} photo. Drag to reorder, or right-click (Shift+F10) to choose its place.`}
           aria-label={`${ordinal(i)} photo`}
           aria-haspopup="menu"
           className={
