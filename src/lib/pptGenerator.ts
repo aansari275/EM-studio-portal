@@ -2,7 +2,8 @@ import pptxgen from 'pptxgenjs';
 import { photoSlotsFor, fitContain, type Box } from './deckSlots';
 import { orderedImages } from './img';
 import type { ShowroomProduct } from './firebase';
-import type { DeckImages } from './deckImages';
+import type { DeckImages, PhotoSlot } from './deckImages';
+import { firstRoomImage } from './roomImages';
 
 // Brand colors (matching EMPL template)
 const COLORS = {
@@ -51,6 +52,12 @@ export interface DeckOptions {
   /** Photos past the fourth go onto 8-up slides after the rug's own slide. */
   extraPhotos?: boolean;
   layout?: DeckLayout;
+  /**
+   * One rug per slide only: after each rug's slide(s), a full slide with its
+   * first room setting image. Rugs without one are unchanged; off (the
+   * default) gives exactly the deck as before.
+   */
+  roomSlides?: boolean;
 }
 
 // Set per build. Kept module-level like ASSETS_BASE so the slide helpers stay
@@ -67,7 +74,7 @@ export function buildPptx(
   title: string = 'Eastern Mills',
   opts: DeckOptions = {}
 ): pptxgen {
-  const { layout = 'single', extraPhotos = false } = opts;
+  const { layout = 'single', extraPhotos = false, roomSlides = false } = opts;
   IMAGES = opts.images;
   const pptx = new pptxgen();
 
@@ -93,6 +100,7 @@ export function buildPptx(
     for (const product of products) {
       addProductSlide(pptx, product);
       if (extraPhotos) addMorePhotoSlides(pptx, product);
+      if (roomSlides) addRoomSlide(pptx, product);
     }
   }
 
@@ -137,18 +145,31 @@ export async function buildPptxBlob(
  */
 export function deckPhotoSlots(
   products: ShowroomProduct[],
-  opts: Pick<DeckOptions, 'layout' | 'extraPhotos'> = {}
-): Array<{ url: string; w: number; h: number }> {
-  const { layout = 'single', extraPhotos = false } = opts;
-  return products.flatMap((p) => {
+  opts: Pick<DeckOptions, 'layout' | 'extraPhotos' | 'roomSlides'> = {}
+): PhotoSlot[] {
+  const { layout = 'single', extraPhotos = false, roomSlides = false } = opts;
+  return products.flatMap((p): PhotoSlot[] => {
     const all = orderedImages(p);
     if (layout === 'grid') return all.slice(0, 1).map((url) => ({ url, w: GRID[0].w, h: GRID[0].h }));
     const slots = photoSlotsFor(p.slideLayout);
-    return all
+    const photos: PhotoSlot[] = all
       .slice(0, extraPhotos ? undefined : 4)
       .map((url, i) => ({ url, w: (slots[i] || GRID[0]).w, h: (slots[i] || GRID[0]).h }));
+    const room = roomSlides ? firstRoomImage(p) : null;
+    if (room) photos.push({ url: room.url, w: SLIDE.w, h: SLIDE.h, maxPx: ROOM_SOURCE_PX });
+    return photos;
   });
 }
+
+/** The 16:9 canvas, in inches. */
+export const SLIDE = { w: 13.333, h: 7.5 };
+
+/**
+ * Room setting images are generated at 1376 x 768. A full slide at 300 ppi
+ * would ask for 4000px, so the fetch is capped at the source's own width:
+ * never an upscale, and the email steps still lower the JPEG quality.
+ */
+export const ROOM_SOURCE_PX = 1376;
 
 /**
  * Put a photo in a slot without stretching it. With pre-sized photos the real
@@ -270,6 +291,58 @@ function addMorePhotoSlides(pptx: pptxgen, product: DeckRecord) {
     more.slice(i, i + GRID.length).forEach((src, j) => placeImage(slide, src, GRID[j], 'bottom'));
     addSpecBlock(slide, product);
   }
+}
+
+/**
+ * The room setting slide: the rug's first room image over the whole slide
+ * (cover, centred), the EM mark in its usual corner and the style under it
+ * bottom left. The mark is a thin dark outline that disappears on a dark
+ * room, so it sits on a small white plate, the same device the intro slide
+ * uses behind its logo; the caption gets the same plate, in the product
+ * slide's grey and font.
+ */
+export const ROOM_PLATE = { x: 11.764, y: 0.34, w: 1.044, h: 0.67 };
+
+export function roomCaption(p: ShowroomProduct): string {
+  const style = (p.styleNumber || p.baseStyleNumber || '').trim().toUpperCase();
+  const color = (p.color || '').trim().toUpperCase();
+  const slug = color.replace(/[^A-Z0-9]+/g, '-');
+  return color && !style.endsWith(slug) ? [style, color].filter(Boolean).join('  ·  ') : style;
+}
+
+function addRoomSlide(pptx: pptxgen, product: DeckRecord) {
+  const room = firstRoomImage(product);
+  if (!room) return;
+  const img = IMAGES?.get(room.url);
+  if (IMAGES && !img) return; // the fetch failed: no slide rather than an empty one
+  const slide = pptx.addSlide();
+  const cover = { type: 'cover' as const, w: SLIDE.w, h: SLIDE.h };
+  if (img) {
+    // pptxgenjs crops from the w/h given here, so they carry the photo's real shape.
+    slide.addImage({ data: img.data, x: 0, y: 0, w: (SLIDE.h * img.w) / img.h, h: SLIDE.h, sizing: cover });
+  } else {
+    slide.addImage({ path: room.url, x: 0, y: 0, w: SLIDE.w, h: SLIDE.h, sizing: cover });
+  }
+  const plate = { fill: { color: COLORS.white, transparency: 12 }, line: { type: 'none' as const }, rectRadius: 0.05 };
+  slide.addShape('roundRect', { ...ROOM_PLATE, ...plate });
+  addCornerLogo(slide);
+
+  const caption = roomCaption(product);
+  if (!caption) return;
+  const w = Math.min(7, 0.45 + caption.length * 0.093); // Montserrat 10.5pt caps with 1pt spacing, with some slack
+  const box = { x: 0.525, y: SLIDE.h - 0.34 - 0.36, w, h: 0.36 };
+  slide.addShape('roundRect', { ...box, ...plate });
+  slide.addText(caption, {
+    ...box,
+    fontSize: 10.5,
+    fontFace: FONTS.main,
+    color: COLORS.gray,
+    charSpacing: 1,
+    align: 'center',
+    valign: 'middle',
+    margin: 0,
+    fit: 'shrink',
+  });
 }
 
 /**
