@@ -313,7 +313,7 @@ export function RoomSettingDialog({ product, startPhoto, onClose, onKept }: {
         )}
 
         {(phase.kind === 'result' || phase.kind === 'saving') && (
-          <Result c={phase.c} rug={photo} saving={phase.kind === 'saving'} error={error}
+          <Result key={phase.c.url} c={phase.c} rug={photo} saving={phase.kind === 'saving'} error={error}
             onKeep={() => void keep(phase.c)}
             onAgain={() => void create()}
             onDiscard={() => { setError(''); setPhase({ kind: 'options' }); }}
@@ -331,6 +331,7 @@ function Result({ c, rug, saving, error, onKeep, onAgain, onDiscard, againDisabl
 }) {
   const [side, setSide] = useState(false);
   const [hold, setHold] = useState(false);
+  const [shown, setShown] = useState(false);
   const holdKeys = {
     onPointerDown: () => setHold(true), onPointerUp: () => setHold(false), onPointerLeave: () => setHold(false), onPointerCancel: () => setHold(false),
     onKeyDown: (e: React.KeyboardEvent) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setHold(true); } },
@@ -352,7 +353,13 @@ function Result({ c, rug, saving, error, onKeep, onAgain, onDiscard, againDisabl
         </div>
       ) : (
         <div className="relative aspect-video w-full overflow-hidden rounded-sm bg-neutral-100">
-          <img src={c.url} alt="The rug in a room" className="absolute inset-0 h-full w-full object-cover" />
+          <img key={c.url} src={c.url} alt="The rug in a room" onLoad={() => setShown(true)} onError={() => setShown(true)}
+            className="absolute inset-0 h-full w-full object-cover" />
+          {!shown && (
+            <div className="absolute inset-0 grid animate-pulse place-items-center bg-neutral-100 text-[13px] text-neutral-500" role="status">
+              Loading the picture
+            </div>
+          )}
           {/* always loaded, shown while held, so the compare is instant */}
           <img src={thumb(fixStorageUrl(rug), 1200)} alt={hold ? 'The rug photo' : ''} aria-hidden={!hold}
             className={'absolute inset-0 h-full w-full bg-white object-contain ' + (hold ? 'opacity-100' : 'opacity-0')} />
