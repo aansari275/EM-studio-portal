@@ -38,15 +38,21 @@ export const EMAIL_STEPS: Quality[] = [
   { ppi: 110, q: 62 },
 ];
 
-/** A photo and the slot it goes in, in inches. */
-export type PhotoSlot = { url: string; w: number; h: number };
+/**
+ * A photo and the slot it goes in, in inches. `maxPx` caps the long side of
+ * the fetch for a source known to be small (a room setting image is 1376px
+ * wide), so a full slide at 300 ppi never asks for an upscale.
+ */
+export type PhotoSlot = { url: string; w: number; h: number; maxPx?: number };
 type Px = { w: number; h: number; q: number };
 
-const px = (slot: { w: number; h: number }, { ppi, q }: Quality): Px => ({
-  w: Math.round(slot.w * ppi),
-  h: Math.round(slot.h * ppi),
-  q,
-});
+const px = (slot: { w: number; h: number; maxPx?: number }, { ppi, q }: Quality): Px => {
+  const w = Math.round(slot.w * ppi);
+  const h = Math.round(slot.h * ppi);
+  if (!slot.maxPx || Math.max(w, h) <= slot.maxPx) return { w, h, q };
+  const s = slot.maxPx / Math.max(w, h);
+  return { w: Math.round(w * s), h: Math.round(h * s), q };
+};
 
 /** Most mail servers refuse attachments above 25 MB. */
 export const EMAIL_LIMIT = 25 * 1024 * 1024;
@@ -128,11 +134,14 @@ export async function loadDeckImages(
   quality: Quality,
   onProgress?: (done: number, total: number) => void
 ): Promise<DeckImages> {
-  const biggest = new Map<string, { w: number; h: number }>();
+  const biggest = new Map<string, { w: number; h: number; maxPx?: number }>();
   for (const s of slots) {
     if (!s.url) continue;
     const b = biggest.get(s.url);
-    biggest.set(s.url, { w: Math.max(s.w, b?.w || 0), h: Math.max(s.h, b?.h || 0) });
+    const big = { w: Math.max(s.w, b?.w || 0), h: Math.max(s.h, b?.h || 0) };
+    // A cap only holds while every use of the photo carries one.
+    const maxPx = s.maxPx && (!b || b.maxPx) ? Math.max(s.maxPx, b?.maxPx || 0) : undefined;
+    biggest.set(s.url, maxPx ? { ...big, maxPx } : big);
   }
   const unique = [...biggest.keys()];
   const out: DeckImages = new Map();

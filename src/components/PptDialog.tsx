@@ -6,6 +6,7 @@ import { orderedImages } from '../lib/img';
 import { withFreshSlideLayouts } from '../lib/productEdit';
 import { buildPptxBlob, deckFileName, deckPhotoSlots, type DeckLayout, type DeckRecord } from '../lib/pptGenerator';
 import { loadDeckImages, FULL, EMAIL_STEPS, EMAIL_LIMIT, type Quality } from '../lib/deckImages';
+import { firstRoomImage, type RoomImage } from '../lib/roomImages';
 
 /**
  * Options before a deck is built, and a size check after.
@@ -27,7 +28,7 @@ type Step =
  * dialog opens and written when a deck is built. Both fail silently: without
  * them the dialog simply starts from the defaults, as it always did.
  */
-interface DeckPrefs { layout: DeckLayout; extraPhotos: boolean }
+interface DeckPrefs { layout: DeckLayout; extraPhotos: boolean; roomSlides: boolean }
 const prefsRef = (uid: string) => doc(db, 'config', `ppt_prefs_${uid}`);
 
 async function loadPrefs(): Promise<Partial<DeckPrefs> | null> {
@@ -38,8 +39,36 @@ async function loadPrefs(): Promise<Partial<DeckPrefs> | null> {
   return {
     layout: d.layout === 'grid' || d.layout === 'single' ? d.layout : undefined,
     extraPhotos: typeof d.extraPhotos === 'boolean' ? d.extraPhotos : undefined,
+    roomSlides: typeof d.roomSlides === 'boolean' ? d.roomSlides : undefined,
   };
 }
+
+type Rooms = Map<string, RoomImage[] | undefined>;
+
+/**
+ * Each Library rug's room setting images as saved now. Tray copies are
+ * snapshots (and search results may not carry the field), so this is read
+ * when the dialog opens, for the tick, and again before building, like the
+ * slide layouts. A rug that cannot be read keeps what it had.
+ */
+async function readRoomImages(products: DeckRecord[]): Promise<Rooms> {
+  const out: Rooms = new Map();
+  await Promise.all(products.map(async (p) => {
+    try {
+      const em = p.id.startsWith('em:');
+      const snap = await getDoc(doc(db, em ? 'em_products' : 'showroom_products', em ? p.id.slice(3) : p.id));
+      if (!snap.exists()) return;
+      const list = snap.data()?.roomImages;
+      out.set(p.id, Array.isArray(list) ? list : undefined);
+    } catch {
+      /* keep the tray copy */
+    }
+  }));
+  return out;
+}
+
+const withRooms = (products: DeckRecord[], rooms: Rooms | null): DeckRecord[] =>
+  rooms ? products.map((p) => (rooms.has(p.id) ? { ...p, roomImages: rooms.get(p.id) } : p)) : products;
 
 function savePrefs(p: DeckPrefs) {
   const uid = currentUserUid();
@@ -92,6 +121,8 @@ export default function PptDialog({
 }) {
   const [layout, setLayout] = useState<DeckLayout>('single');
   const [extraPhotos, setExtraPhotos] = useState(true);
+  const [roomSlides, setRoomSlides] = useState(true);
+  const [rooms, setRooms] = useState<Rooms | null>(null);
   const [step, setStep] = useState<Step>({ kind: 'options' });
 
   // Apply the saved setup unless she has already changed something herself.
@@ -103,6 +134,7 @@ export default function PptDialog({
         if (!live || !p || touched.current) return;
         if (p.layout && !singleOnly) setLayout(p.layout);
         if (p.extraPhotos !== undefined) setExtraPhotos(p.extraPhotos);
+        if (p.roomSlides !== undefined && !singleOnly) setRoomSlides(p.roomSlides);
       })
       .catch(() => {});
     return () => { live = false; };
@@ -114,20 +146,40 @@ export default function PptDialog({
     return { photos: counts.reduce((a, b) => a + b, 0), rugs: counts.filter(Boolean).length };
   }, [products]);
 
-  const slots = useMemo(() => deckPhotoSlots(products, { layout, extraPhotos }), [products, layout, extraPhotos]);
+  // Room setting slides: Library decks only (entries have no room images and
+  // must build exactly as before), one rug per slide only.
+  useEffect(() => {
+    if (singleOnly) return;
+    let live = true;
+    readRoomImages(products).then((r) => { if (live) setRooms(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [products, singleOnly]);
+  const shown = useMemo(() => withRooms(products, rooms), [products, rooms]);
+  const roomCount = useMemo(() => (singleOnly ? 0 : shown.filter((p) => firstRoomImage(p)).length), [shown, singleOnly]);
+  const roomOn = layout === 'single' && roomCount > 0 && roomSlides;
+
+  const slots = useMemo(
+    () => deckPhotoSlots(shown, { layout, extraPhotos, roomSlides: roomOn }),
+    [shown, layout, extraPhotos, roomOn]
+  );
 
   async function build(quality: Quality, label: string): Promise<Blob> {
     setStep({ kind: 'working', label: 'Reading slide layouts' });
     // Each rug's own photo boxes, as saved now, not as they were when ticked.
     // Photos are fetched at the size of the box they land in.
-    const deckProducts = layout === 'single' ? await freshen(products) : products;
-    const slots = deckPhotoSlots(deckProducts, { layout, extraPhotos });
+    // Room images are re-read the same way, only when they will be used, so
+    // with the tick off the deck is built from exactly what it was before.
+    const [fresh, freshRooms] = layout === 'single'
+      ? await Promise.all([freshen(products), roomOn ? readRoomImages(products) : null])
+      : [products, null];
+    const deckProducts = withRooms(fresh, freshRooms);
+    const slots = deckPhotoSlots(deckProducts, { layout, extraPhotos, roomSlides: roomOn });
     setStep({ kind: 'working', label, done: 0, total: slots.length });
     const images = await loadDeckImages(slots, quality, (done, total) =>
       setStep({ kind: 'working', label, done, total })
     );
     setStep({ kind: 'working', label: 'Putting the slides together' });
-    return buildPptxBlob(deckProducts, title, { images, layout, extraPhotos });
+    return buildPptxBlob(deckProducts, title, { images, layout, extraPhotos, roomSlides: roomOn });
   }
 
   async function run(fn: () => Promise<void>) {
@@ -140,7 +192,7 @@ export default function PptDialog({
 
   const buildFull = () =>
     run(async () => {
-      if (!singleOnly) savePrefs({ layout, extraPhotos });
+      if (!singleOnly) savePrefs({ layout, extraPhotos, roomSlides });
       const blob = await build(FULL, 'Preparing photos');
       if (blob.size > EMAIL_LIMIT) return setStep({ kind: 'big', blob });
       save(blob, fileName);
@@ -219,6 +271,27 @@ export default function PptDialog({
                   <span className="block text-[12.5px] text-neutral-500">
                     {extra.photos} more across {extra.rugs} rug{extra.rugs === 1 ? '' : 's'}, eight to a slide after
                     each rug
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {layout === 'single' && roomCount > 0 && (
+              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-sm border border-neutral-200 p-3 text-sm hover:border-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={roomSlides}
+                  onChange={(e) => { touched.current = true; setRoomSlides(e.target.checked); }}
+                  className="mt-0.5 accent-[#2F4C69]"
+                />
+                <span>
+                  Add room setting slides
+                  <span className="block text-[12.5px] text-neutral-500">
+                    {products.length === 1
+                      ? 'This rug has one, a full slide after its own'
+                      : `${roomCount === products.length ? `All ${roomCount}` : `${roomCount} of ${products.length}`} rugs ${
+                          roomCount === 1 ? 'has' : 'have'
+                        } one, a full slide after each`}
                   </span>
                 </span>
               </label>
