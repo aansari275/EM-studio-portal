@@ -115,6 +115,7 @@ function mapEm(id: string, d: any): ShowroomProduct {
     heroPinned: !!d.heroPinned,
     slideLayout: parseSlideLayout(d.slideLayout),
     photoOriginals: parsePhotoOriginals(d.photoOriginals),
+    roomImages: Array.isArray(d.roomImages) ? d.roomImages : undefined,
   };
 }
 

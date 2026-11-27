@@ -31,6 +31,7 @@ import { useTabActive } from '../lib/tabContext';
 import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
 import type { Slot } from '../lib/photoSlots';
 import { TrainingButton } from '../components/TrainingButton';
+import { TearsheetButton } from '../components/TearsheetButton';
 
 /**
  * Filters are derived from the style number, because that is the only field the
@@ -814,6 +815,7 @@ function Detail({ product, editOnOpen, onClose, onChanged, onLayoutSaved, onCopy
                   <Copy className="h-3.5 w-3.5" /> Copy as new design
                 </button>
               )}
+              <TearsheetButton product={product} />
             </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-neutral-100 pt-4">
