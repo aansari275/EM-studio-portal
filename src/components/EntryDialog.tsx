@@ -11,7 +11,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { SaveStatus } from './SaveStatus';
 import { Label } from './NewProduct';
 import {
-  discardDraft, fetchPhoto, newEntryId, promoteEntry, saveEntryFields, saveEntryFieldsOnExit, softDeleteEntry,
+  discardDraft, fetchPhoto, newEntryId, promoteEntry, rotateEntryPhoto, saveEntryFields, saveEntryFieldsOnExit, softDeleteEntry,
   uploadEntryPhoto, KIND_NOUN, formatDate,
   type Customer, type EntryFields, type EntryKind, type EntryPhoto, type StudioEntry,
 } from '../lib/studioEntries';
@@ -22,6 +22,9 @@ import { PhotoStrip } from './PhotoOrder';
 import { SlideBoxes } from './SlidePreview';
 import { photoSlotsFor, isDefaultSlots, toFrac, type Box, type SlideLayout } from '../lib/deckSlots';
 import { entryDeckFileName, entryDeckRecord, reorderBy } from '../lib/studioEntryDeck';
+import { RotateButton } from './Rotate';
+import { useQuarterTurns } from '../lib/useQuarterTurns';
+import { ROUND_BUTTON } from '../lib/useCutout';
 
 // pptxgenjs is large: the deck dialog loads only when Download PPT is pressed.
 const PptDialog = lazy(() => import('./PptDialog'));
@@ -165,9 +168,24 @@ export function EntryDialog({
     mode !== 'new',
   );
 
+  const viewing = Math.max(0, photos.findIndex((p) => p.url === shot));
+  const big = photos[viewing];
+
+  // ─── turn the big photo (saved entry), like the Library preview ──────
+  // A new file in the entry's folder takes the photo's place in the list;
+  // the autosave writes it, so the list, the diagram and the PPT follow.
+  const turn = useQuarterTurns(id, big?.url || '', async (url, n) => {
+    const from = photos.find((p) => p.url === url);
+    if (!from) throw new Error('That photo is no longer on this entry.');
+    const next = await rotateEntryPhoto(kind, id, from, n);
+    setPhotos((cur) => cur.map((p) => (p.url === url ? next : p)));
+    setShot((s) => (s === url || !s ? next.url : s));
+  });
+
+  const turnPending = turn.pendingTurn;
   const uploading = slots.filter(needsUpload).length;
   const failedUploads = slots.filter((s) => s.syncError).length;
-  const unsaved = dirty || uploading > 0 || status.state === 'error';
+  const unsaved = dirty || uploading > 0 || status.state === 'error' || turn.pendingTurn;
   useUnsavedWork(unsaved
     ? `This ${KIND_NOUN[kind]} still has changes or photos being saved. Closing now may lose them.`
     : null);
@@ -175,6 +193,15 @@ export function EntryDialog({
   // ─── actions ──────────────────────────────────────────────────────────
   const requestClose = useCallback(() => {
     if (busy) return;
+    if (turnPending) {
+      setConfirm({
+        title: 'Photo still turning',
+        message: 'A photo is still being turned and saved. If you close now, it stays as it was.',
+        confirmLabel: 'Close anyway', cancelLabel: 'Keep it open', danger: true,
+        run: onClose,
+      });
+      return;
+    }
     if (uploading > 0) {
       setConfirm({
         title: 'Photos still uploading',
@@ -185,7 +212,7 @@ export function EntryDialog({
       return;
     }
     onClose(); // unmounting writes anything still waiting
-  }, [busy, uploading, mode, onClose]);
+  }, [busy, uploading, mode, onClose, turnPending]);
 
   const tabActive = useTabActive();
   useEffect(() => {
@@ -261,12 +288,11 @@ export function EntryDialog({
       setSlots((cur) => reorderBy(cur, (s) => s.remote?.url, next, shown, stash.current as Map<string, Slot>));
     }
   };
-  const viewing = Math.max(0, photos.findIndex((p) => p.url === shot));
-  const big = photos[viewing];
-
   // ─── Download PPT ─────────────────────────────────────────────────────
   const working = slots.some((s) => s.working);
-  const pptBlocked = uploading > 0
+  const pptBlocked = turnPending
+    ? 'Waiting for the turned photo to save.'
+    : uploading > 0
     ? `Waiting for ${uploading} photo${uploading > 1 ? 's' : ''} to upload.`
     : working ? 'Waiting for the backgrounds to finish.'
       : !fields.photos.length ? 'Add a photo to make a PPT.' : '';
@@ -321,7 +347,16 @@ export function EntryDialog({
           {isSaved && photos.length > 0 && (
             <div>
               <div className="relative grid h-[min(56vh,520px)] place-items-center overflow-hidden rounded-sm bg-[conic-gradient(#f3f3f3_0_25%,#fff_0_50%,#f3f3f3_0_75%,#fff_0)] bg-[length:16px_16px]">
-                {big && <img src={big.url} alt={`Photo ${viewing + 1} of ${photos.length}`} className="max-h-full max-w-full object-contain" />}
+                {big && <img key={big.url} src={big.url} alt={`Photo ${viewing + 1} of ${photos.length}`} style={turn.style} className="absolute inset-0 h-full w-full object-contain" />}
+                {big && (
+                  <div className="absolute right-3 top-3 flex flex-col gap-2">
+                    <RotateButton onClick={turn.rotate} busy={turn.busy} disabled={!!busy || uploading > 0}
+                      label="Turn this photo 90° clockwise" className={ROUND_BUTTON + ' [&_svg]:h-4 [&_svg]:w-4'} />
+                  </div>
+                )}
+                {turn.error && (
+                  <p role="alert" className="absolute inset-x-0 bottom-0 bg-red-700/90 px-3 py-1.5 text-[12px] text-white">{turn.error}</p>
+                )}
                 {photos.length > 1 && (
                   <>
                     <button type="button" aria-label="Previous photo" onClick={() => setShot(photos[(viewing - 1 + photos.length) % photos.length].url)}
@@ -361,7 +396,7 @@ export function EntryDialog({
           <div>
             <Label required={!isSaved}>{isSaved ? 'Add photos' : 'Photos'}</Label>
             <div className="mt-2">
-              <PhotoPicker slots={slots} onChange={setSlots} disabled={!!busy} noMain showSync />
+              <PhotoPicker slots={slots} onChange={setSlots} disabled={!!busy} noMain showSync rotate />
             </div>
           </div>
 

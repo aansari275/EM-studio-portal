@@ -93,7 +93,7 @@ export async function rotateBlob(
   blob: Blob,
   quarterTurns: number,
   maxSide = 2000
-): Promise<{ blob: Blob; type: string; ext: string }> {
+): Promise<{ blob: Blob; type: string; ext: string; width: number; height: number }> {
   const turns = ((quarterTurns % 4) + 4) % 4;
   const bmp = await decode(blob);
   const [w, h] = fitSize(bmp.width, bmp.height, maxSide);
@@ -104,5 +104,5 @@ export async function rotateBlob(
   ctx.drawImage(bmp, -w / 2, -h / 2, w, h);
   bmp.close();
   const d = ctx.getImageData(0, 0, c.width, c.height);
-  return encode({ width: c.width, height: c.height, data: d.data });
+  return { ...(await encode({ width: c.width, height: c.height, data: d.data })), width: c.width, height: c.height };
 }

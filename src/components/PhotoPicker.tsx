@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Plus, X, Undo2, Scissors, Download } from 'lucide-react';
 import { ACCEPT } from '../lib/imageIntake';
 import { Working, Spinner } from './Working';
+import { RotateButton } from './Rotate';
 import { busySummary, CUT_LABEL, type Job } from '../lib/jobStatus';
 import {
   addFilesAsSlots, isBusySlot, isReadySlot, isSyncedSlot, replaceFile, restoreOriginal, type Slot, type SlotUpdate,
@@ -44,6 +45,7 @@ export function PhotoPicker({
   onDownload,
   showSync,
   select,
+  rotate,
 }: {
   slots: Slot[];
   /** A state setter: updates arrive while conversions and cutouts finish. */
@@ -59,6 +61,12 @@ export function PhotoPicker({
   showSync?: boolean;
   /** Tick boxes on the tiles (Background Removal's Send to), with Retry for a failed send. */
   select?: { selected: Set<string>; toggle: (id: string) => void; onRetry?: (id: string) => void };
+  /**
+   * A round turn button on each tile (Custom Rugs, Sample Dispatch). Like the
+   * Library: the turn shows at once and is applied when the clicks stop, as an
+   * edit of the tile (new file, first original kept, Undo puts it back).
+   */
+  rotate?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [urls, setUrls] = useState<string[]>([]);
@@ -68,6 +76,50 @@ export function PhotoPicker({
   /** Open the editor on Touch up (from a Check this note). */
   const [touchFirst, setTouchFirst] = useState(false);
   const edit = (i: number, touch = false) => { setTouchFirst(touch); setEditing(i); };
+
+  // ─── turning tiles (rotate) ───────────────────────────────────────────
+  const latest = useRef(slots);
+  latest.current = slots;
+  const [turns, setTurns] = useState<Record<string, number>>({});
+  const [turning, setTurning] = useState<Record<string, boolean>>({});
+  const [turnError, setTurnError] = useState<Record<string, string>>({});
+  const turnTimers = useRef(new Map<string, number>());
+  const turnCount = useRef(new Map<string, number>());
+  useEffect(() => () => turnTimers.current.forEach((t) => window.clearTimeout(t)), []);
+  const setFor = <T,>(set: (f: (m: Record<string, T>) => Record<string, T>) => void, id: string, v: T | undefined) =>
+    set((m) => { const n = { ...m }; if (v === undefined) delete n[id]; else n[id] = v; return n; });
+
+  function turnTile(id: string) {
+    if (turning[id]) return;
+    setFor(setTurnError, id, undefined);
+    const n = (turnCount.current.get(id) || 0) + 1;
+    turnCount.current.set(id, n);
+    setFor(setTurns, id, n);
+    window.clearTimeout(turnTimers.current.get(id));
+    // Quick clicks are one turn of 180° or 270°, not two or three saves.
+    turnTimers.current.set(id, window.setTimeout(async () => {
+      const q = turnCount.current.get(id) || 0;
+      turnCount.current.delete(id);
+      turnTimers.current.delete(id);
+      const done = () => { setFor(setTurns, id, undefined); setFor(setTurning, id, undefined); };
+      const slot = latest.current.find((x) => x.id === id);
+      if (!slot || q % 4 === 0) { done(); return; }
+      setFor(setTurning, id, true);
+      try {
+        const { rotateBlob } = await import('../lib/canvasImage');
+        // Full resolution stays (the upload caps it at 2000px, the editor works from this file).
+        const turned = await rotateBlob(slot.file, q, 6000);
+        const name = slot.file.name.replace(/\.[^.]+$/, '') + '.' + turned.ext;
+        const file = new File([turned.blob], name, { type: turned.type });
+        // Only if nothing else changed the photo meanwhile (a cutout finishing).
+        patch(id, (x) => (x.file === slot.file ? replaceFile(x, file, { cutOfOriginal: false }) : x));
+      } catch (e) {
+        setFor(setTurnError, id, e instanceof Error ? e.message : 'Could not turn the photo.');
+      } finally {
+        done();
+      }
+    }, 900));
+  }
 
   useEffect(() => {
     // only decodable files get a preview; a tile still converting shows its state instead
@@ -162,7 +214,8 @@ export function PhotoPicker({
                 <button type="button" onClick={() => edit(i)} disabled={disabled || isBusySlot(s)}
                   aria-label={`Edit photo ${i + 1}`} title={s.cut ? 'Edit: touch up, fix skew, straighten, crop, tone' : 'Edit: fix skew, straighten, crop, tone'}
                   className="block h-full w-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2F4C69]">
-                  {urls[i] && <img src={urls[i]} alt="" className="h-full w-full object-contain" />}
+                  {urls[i] && <img src={urls[i]} alt="" className="h-full w-full object-contain"
+                    style={turns[s.id] ? { transform: `rotate(${turns[s.id] * 90}deg)`, transition: 'transform 200ms ease' } : undefined} />}
                 </button>
               )}
 
@@ -237,6 +290,18 @@ export function PhotoPicker({
                 </span>
               )}
 
+              {rotate && !s.rejected && !s.converting && !s.working && (() => {
+                const bar = (showSync && (!!s.syncError || s.syncing || !isSyncedSlot(s))) || !!s.send;
+                const uploadingNow = showSync && !s.syncError && (s.syncing || !isSyncedSlot(s));
+                return (
+                  <RotateButton onClick={() => turnTile(s.id)} busy={!!turning[s.id]}
+                    disabled={disabled || uploadingNow}
+                    label={`Turn photo ${i + 1} 90° clockwise`}
+                    className={'absolute right-1 grid h-8 w-8 place-items-center rounded-full bg-white/95 text-neutral-700 shadow-[0_1px_3px_rgba(0,0,0,0.2)] hover:text-[#2F4C69] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#2F4C69] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [&_svg]:h-4 [&_svg]:w-4 '
+                      + (bar ? 'bottom-6' : 'bottom-1')} />
+                );
+              })()}
+
               <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                 {onDownload && isReadySlot(s) && (
                   <button type="button" onClick={() => onDownload(i)} aria-label={`Download photo ${i + 1}`}
@@ -268,6 +333,9 @@ export function PhotoPicker({
                   Touch up
                 </button>
               </>
+            )}
+            {turnError[s.id] && (
+              <p role="alert" className="mt-1 line-clamp-2 text-[10px] leading-tight text-red-700" title={turnError[s.id]}>{turnError[s.id]}</p>
             )}
             {s.sent && (
               <p className="mt-1 line-clamp-2 text-[10px] leading-tight text-[#2F4C69]" title={s.sent}>{s.sent}</p>

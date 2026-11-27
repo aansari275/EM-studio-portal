@@ -163,6 +163,38 @@ export async function uploadEntryPhoto(
   return { url: await getDownloadURL(sref), path, name, width: p.width, height: p.height, uploadedAt: new Date().toISOString() };
 }
 
+/**
+ * Turns one saved photo of an entry by quarter turns (1 = 90° clockwise),
+ * like the Library's rotate: the pixels are turned in a canvas (a cutout stays
+ * a PNG with its transparency) and saved as a NEW file in the entry's folder
+ * through the same upload as every entry photo, so path, width and height
+ * describe the stored bytes. The old file stays in Storage. Returns the photo
+ * to put in the same position; the caller's autosave writes the list.
+ *
+ * The pre-edit original is handled like an edit on a tile (`replaceFile`):
+ * the first original is kept, or the photo before the turn becomes it, and
+ * the file is no longer a direct cut of that original.
+ */
+export async function rotateEntryPhoto(
+  kind: EntryKind, id: string, photo: EntryPhoto, quarterTurns: number, onStatus?: (s: UploadStatus) => void
+): Promise<EntryPhoto> {
+  const turns = ((quarterTurns % 4) + 4) % 4;
+  if (!turns) return photo;
+  const res = await fetch(photo.url);
+  if (!res.ok) throw new Error('Could not load the photo to turn it.');
+  const { rotateBlob } = await import('./canvasImage');
+  const turned = await rotateBlob(await res.blob(), turns, 2000);
+  const file = new File([turned.blob], `${safeBase(photo.name)}.${turned.ext}`, { type: turned.type });
+  const up = await uploadEntryPhoto(kind, id, file, onStatus);
+  const next: EntryPhoto = {
+    ...up,
+    originalUrl: photo.originalUrl || photo.url,
+    originalPath: photo.originalPath || photo.path,
+  };
+  if (photo.cut) next.cut = true;
+  return next;
+}
+
 // ─── Writes ─────────────────────────────────────────────────────────────────
 
 export async function softDeleteEntry(kind: EntryKind, id: string): Promise<void> {
