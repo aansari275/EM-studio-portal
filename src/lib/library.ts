@@ -4,6 +4,7 @@ import {
 import { db } from './firebase';
 import { parseSlideLayout } from './deckSlots';
 import { parsePhotoOriginals } from './photoOriginals';
+import { parseRoomImages } from './roomSetting';
 import {
   getShowroomProducts, searchShowroomProducts, searchShowroomPage, getDesignVariants, mapShowroomData,
   type ShowroomProduct,
@@ -115,6 +116,7 @@ function mapEm(id: string, d: any): ShowroomProduct {
     heroPinned: !!d.heroPinned,
     slideLayout: parseSlideLayout(d.slideLayout),
     photoOriginals: parsePhotoOriginals(d.photoOriginals),
+    roomImages: parseRoomImages(d.roomImages),
   };
 }
 

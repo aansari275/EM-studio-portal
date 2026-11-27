@@ -2,6 +2,8 @@ import { initializeApp } from 'firebase/app';
 import { fixStorageUrl } from './img';
 import { parseSlideLayout, type SlideLayout } from './deckSlots';
 import { parsePhotoOriginals, type PhotoOriginal } from './photoOriginals';
+import type { RoomImage } from './roomImages';
+import { parseRoomImages } from './roomSetting';
 import { prepareUpload, uploadWithProgress, type UploadStatus } from './uploadPrep';
 import {
   getFirestore,
@@ -632,6 +634,8 @@ export interface ShowroomProduct {
   /** Cutouts kept from the Library preview and the photo each replaced,
    *  so Restore original can put it back. See photoOriginals.ts. */
   photoOriginals?: PhotoOriginal[];
+  /** Room setting images kept from the preview, first = the one decks use. See roomSetting.ts. */
+  roomImages?: RoomImage[];
 }
 
 export interface DesignGroup {
@@ -854,6 +858,7 @@ export function mapShowroomData(id: string, data: any): ShowroomProduct {
     deleted: !!data.deletedAt,
     slideLayout: parseSlideLayout(data.slideLayout),
     photoOriginals: parsePhotoOriginals(data.photoOriginals),
+    roomImages: parseRoomImages(data.roomImages),
   };
 }
 

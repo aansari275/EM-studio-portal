@@ -27,6 +27,7 @@ import { deleteProduct, restoreProduct, rotatePhoto } from '../lib/productEdit';
 import { useRotate, RotateButton } from '../components/Rotate';
 import { CutoutButton, CutoutWorking, CutoutBar, CutoutTouch, TouchUpButton, EditPhotoButton, CutoutEdit } from '../components/PhotoCutout';
 import { useCutout, ROUND_BUTTON } from '../lib/useCutout';
+import { RoomSettingButton, RoomSettingRound, RoomSettingDialog, RoomRow } from '../components/RoomSetting';
 import { useTabActive } from '../lib/tabContext';
 import { useDeliveries, type Delivery, type LibraryDelivery } from '../lib/sendTo';
 import type { Slot } from '../lib/photoSlots';
@@ -623,6 +624,7 @@ function Detail({ product, editOnOpen, onClose, onChanged, onLayoutSaved, onCopy
     editStarted.current = true;
     void cut.edit();
   }, [editOnOpen, cut]);
+  const [roomOpen, setRoomOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -698,6 +700,7 @@ function Detail({ product, editOnOpen, onClose, onChanged, onLayoutSaved, onCopy
                     <CutoutButton cut={cut} disabled={turn.pendingTurn} />
                     <TouchUpButton cut={cut} disabled={turn.pendingTurn} />
                     <EditPhotoButton cut={cut} disabled={turn.pendingTurn} />
+                    <RoomSettingRound onClick={() => setRoomOpen(true)} disabled={cut.busy || !!cut.result} />
                   </div>
                   <CutoutWorking cut={cut} />
                   {turn.error && (
@@ -711,12 +714,15 @@ function Detail({ product, editOnOpen, onClose, onChanged, onLayoutSaved, onCopy
             <CutoutBar cut={cut} />
             <CutoutTouch cut={cut} />
             <CutoutEdit cut={cut} />
+            {gallery.length > 0 && <RoomSettingButton onClick={() => setRoomOpen(true)} disabled={cut.busy || !!cut.result} />}
+            {roomOpen && <RoomSettingDialog product={product} startPhoto={shot} onClose={() => setRoomOpen(false)} onKept={(p) => onChanged?.(p)} />}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <PhotoOrder product={product} photos={gallery} shot={shot} onShot={setShot}
                 onEdit={(u) => { setShot(u); void cut.edit(u); }}
                 onSaved={(p) => onChanged?.(p)} />
               <PhotoDrop product={product} onUploaded={(p) => onChanged?.(p)} />
             </div>
+            <RoomRow product={product} onChanged={(p) => onChanged?.(p)} />
             <SlidePreview product={product} photos={gallery} onPick={setShot} onLayoutSaved={onLayoutSaved} />
           </div>
 
