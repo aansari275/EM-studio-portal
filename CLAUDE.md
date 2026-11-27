@@ -6,6 +6,10 @@ Simple photography portal for the studio team at Eastern Mills. Upload photos fo
 2. **Sample Bazar** - Product thumbnails (shows across all apps)
 3. **Rug Gallery** - Browse all showroom products and upload additional photos
 
+## Deploy rule for this repo (owner, 27 Nov 2026)
+
+Abdul, 27 Nov 2026: "yes push that. dont ask me. push whatever we build from now on for studi portal". So for this repo only, finished and tested work is pushed to `main` (live) without asking first. Still required: fetch and rebase, `npm test`, `npm run build`, no sign-in bypass in the commit, then check the deploy on the live site and report what went out. This does not cover deleting data, Firestore or Storage rule changes, or anything outside this repo.
+
 ## Links
 - **Live URL:** https://em-studio-portal.netlify.app
 - **GitHub:** https://github.com/aansari275/EM-studio-portal
